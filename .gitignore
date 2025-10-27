@@ -5,6 +5,17 @@
 
 # Python
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Testing and Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.pytest_cache/
+.mypy_cache/
 
 # UV
 .venv/
