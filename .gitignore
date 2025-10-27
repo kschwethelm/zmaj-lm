@@ -1,0 +1,19 @@
+# Local files
+.env
+/outputs
+/data
+
+# Python
+__pycache__/
+
+# UV
+.venv/
+
+# Ruff
+.ruff_cache/
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
