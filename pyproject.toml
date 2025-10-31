@@ -9,6 +9,7 @@ dependencies = [
     "flax>=0.10.7",
     "jax[cuda12]>=0.6.2",
     "jaxtyping>=0.3.3",
+    "loguru>=0.7.3",
     "optax>=0.2.6",
     "pydantic>=2.12.3",
     "wandb>=0.22.2",
