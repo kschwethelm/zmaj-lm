@@ -20,6 +20,7 @@ class TransformerConfig(BaseModel):
     layer_norm_eps: float = 1e-5
     use_bias: bool = True  # whether to use bias in linear layers
     attention_dropout_rate: float | None = None  # if None, use dropout_rate
+    residual_dropout_rate: float | None = None  # if None, use dropout_rate
 
     @model_validator(mode="after")
     def validate_num_heads(self) -> "TransformerConfig":
@@ -35,6 +36,20 @@ class TransformerConfig(BaseModel):
         # Ensure mlp_dim is set correctly
         if self.mlp_dim is None:
             object.__setattr__(self, "mlp_dim", 4 * self.hidden_dim)
+        return self
+
+    @model_validator(mode="after")
+    def validate_attention_dropout_rate(self) -> "TransformerConfig":
+        # Use dropout_rate if attention_dropout_rate is not specified
+        if self.attention_dropout_rate is None:
+            object.__setattr__(self, "attention_dropout_rate", self.dropout_rate)
+        return self
+
+    @model_validator(mode="after")
+    def validate_residual_dropout_rate(self) -> "TransformerConfig":
+        # Use dropout_rate if residual_dropout_rate is not specified
+        if self.residual_dropout_rate is None:
+            object.__setattr__(self, "residual_dropout_rate", self.dropout_rate)
         return self
 
     @computed_field  # type: ignore[prop-decorator]

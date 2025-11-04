@@ -51,3 +51,34 @@ class TestTransformerConfig:
         assert restored.vocab_size == 1000
         assert restored.hidden_dim == 512
         assert restored.mlp_dim == 2048  # Auto-computed
+
+    def test_attention_dropout_rate_auto_set(self) -> None:
+        """Test that attention_dropout_rate defaults to dropout_rate if None."""
+        config = TransformerConfig(dropout_rate=0.15, attention_dropout_rate=None)
+        assert config.attention_dropout_rate == 0.15
+
+    def test_attention_dropout_rate_explicit(self) -> None:
+        """Test that attention_dropout_rate can be set explicitly."""
+        config = TransformerConfig(dropout_rate=0.1, attention_dropout_rate=0.2)
+        assert config.attention_dropout_rate == 0.2
+        assert config.dropout_rate == 0.1
+
+    def test_residual_dropout_rate_auto_set(self) -> None:
+        """Test that residual_dropout_rate defaults to dropout_rate if None."""
+        config = TransformerConfig(dropout_rate=0.15, residual_dropout_rate=None)
+        assert config.residual_dropout_rate == 0.15
+
+    def test_residual_dropout_rate_explicit(self) -> None:
+        """Test that residual_dropout_rate can be set explicitly."""
+        config = TransformerConfig(dropout_rate=0.1, residual_dropout_rate=0.05)
+        assert config.residual_dropout_rate == 0.05
+        assert config.dropout_rate == 0.1
+
+    def test_all_dropout_rates_independent(self) -> None:
+        """Test that all three dropout rates can be set independently."""
+        config = TransformerConfig(
+            dropout_rate=0.1, attention_dropout_rate=0.2, residual_dropout_rate=0.05
+        )
+        assert config.dropout_rate == 0.1
+        assert config.attention_dropout_rate == 0.2
+        assert config.residual_dropout_rate == 0.05
