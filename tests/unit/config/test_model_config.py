@@ -82,3 +82,18 @@ class TestTransformerConfig:
         assert config.dropout_rate == 0.1
         assert config.attention_dropout_rate == 0.2
         assert config.residual_dropout_rate == 0.05
+
+    def test_pos_encoding_type_default(self) -> None:
+        """Test that pos_encoding_type defaults to 'learned'."""
+        config = TransformerConfig()
+        assert config.pos_encoding_type == "learned"
+
+    def test_pos_encoding_literal(self) -> None:
+        """Test that pos_encoding_type accepts only valid literals."""
+        options = ["learned", "sinusoidal"]
+        for option in options:
+            config = TransformerConfig(pos_encoding_type=option)
+            assert config.pos_encoding_type == option
+
+        with pytest.raises(ValueError):
+            TransformerConfig(pos_encoding_type="invalid_type")

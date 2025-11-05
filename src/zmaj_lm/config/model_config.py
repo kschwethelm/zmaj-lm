@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, computed_field, model_validator
 
 
@@ -21,6 +23,8 @@ class TransformerConfig(BaseModel):
     use_bias: bool = True  # whether to use bias in linear layers
     attention_dropout_rate: float | None = None  # if None, use dropout_rate
     residual_dropout_rate: float | None = None  # if None, use dropout_rate
+
+    pos_encoding_type: Literal["learned", "sinusoidal"] = "learned"  # TODO: RoPE, NoPE, RNoPE
 
     @model_validator(mode="after")
     def validate_num_heads(self) -> "TransformerConfig":
