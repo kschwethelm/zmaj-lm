@@ -19,6 +19,7 @@ dependencies = [
     "loguru>=0.7.3",
     "optax>=0.2.6",
     "pydantic>=2.12.3",
+    "tokenizers>=0.22.1",
     "wandb>=0.22.2",
 ]
 
