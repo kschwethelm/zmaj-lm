@@ -1,6 +1,29 @@
 from pydantic import BaseModel, computed_field, model_validator
 
 
+class DatasetConfig(BaseModel):
+    """Configuration for loading a single dataset for tokenizer training.
+
+    Examples:
+        Simple usage:
+        >>> DatasetConfig(path="wikitext")
+
+        With dataset config:
+        >>> DatasetConfig(path="code_search_net", name="python", text_column="whole_func_string")
+
+        With specific split and weight:
+        >>> DatasetConfig(path="wikipedia", name="20231101.en", split="train", text_column="text", weight=0.7)
+    """
+
+    path: str  # HuggingFace dataset path
+    name: str | None = None  # Dataset configuration name (e.g., "python" for code_search_net)
+    split: str = "train"  # Dataset split to use for training
+    eval_split: str | None = None  # Dataset split to use for evaluation (defaults to split if None)
+    text_column: str = "text"  # Column containing text data
+    trust_remote_code: bool = False  # Whether to trust remote code in dataset loading
+    weight: float = 1.0  # Sampling weight for dataset mixing (higher = more samples)
+
+
 class TokenizerTrainingConfig(BaseModel):
     """Configuration for training a BPE tokenizer from scratch using HuggingFace tokenizers.
 
@@ -9,7 +32,7 @@ class TokenizerTrainingConfig(BaseModel):
     """
 
     # Training corpus
-    training_corpus_path: str  # Path to training text file or directory
+    datasets: DatasetConfig | list[DatasetConfig]
     max_training_samples: int | None = None  # Limit samples for faster training
 
     # Vocabulary
@@ -26,6 +49,14 @@ class TokenizerTrainingConfig(BaseModel):
 
     # Output
     save_path: str = "tokenizers/custom_bpe"  # Where to save trained tokenizer
+
+    # Evaluation
+    run_evaluation: bool = True  # Whether to run evaluation after training
+    eval_samples: int = 100  # Number of samples from validation set to evaluate on
+    eval_test_strings: list[str] | None = None  # Custom test strings for qualitative evaluation
+
+    # Reproducibility
+    seed: int = 42  # Random seed for dataset shuffling and sampling
 
     @model_validator(mode="after")
     def validate_vocab_size(self) -> "TokenizerTrainingConfig":

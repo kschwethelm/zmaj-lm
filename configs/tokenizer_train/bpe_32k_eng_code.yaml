@@ -1,0 +1,32 @@
+# Training corpus
+datasets:
+  - path: "flytech/python-codes-25k"
+    split: "train"
+    text_column: "output"
+  #  weight: 0.3
+  #- path: "wikimedia/wikipedia"
+  #  name: "20231101.en"
+  #  split: "train"
+  #  text_column: "text"
+  #  weight: 0.7
+
+max_training_samples: 10000  # Limit samples for faster training
+
+# Vocabulary
+vocab_size: 32000
+min_frequency: 2  # Minimum frequency for BPE merges
+
+# Special tokens
+pad_token: "<PAD>"
+bos_token: "<BOS>"
+eos_token: "<EOS>"
+unk_token: "<UNK>"
+im_start_token: "<|im_start|>"
+im_end_token: "<|im_end|>"
+
+# Output
+save_path: "outputs/tokenizers/bpe_32k_eng_code"
+
+# Evaluation
+run_evaluation: true
+eval_samples: 100  # Number of validation samples to evaluate on
