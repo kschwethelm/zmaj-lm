@@ -30,20 +30,25 @@ class GPTModel(nn.Module):
         self.final_layernorm = nn.LayerNorm(epsilon=self.config.layer_norm_eps)
 
     def __call__(
-        self, input_ids: jax.Array, deterministic: bool = False, lengths: jax.Array | None = None
+        self,
+        input_ids: jax.Array,
+        deterministic: bool = False,
+        attention_mask: jax.Array | None = None,
     ) -> jax.Array:
         """Forward pass of the GPT model.
 
         Args:
             input_ids: Input token IDs of shape (batch, seq_len)
             deterministic: If True, disable dropout (for inference)
-            lengths: Optional lengths of sequences
+            attention_mask: Optional attention mask of shape (batch, seq_len) where True/1 indicates
+                          valid tokens and False/0 indicates padding
 
         Returns:
             Logits over vocabulary of shape (batch, seq_len, vocab_size)
         """
         seq_len = input_ids.shape[1]
-        mask = create_decoder_mask(seq_len, lengths)  # (batch, 1, seq_len, seq_len)
+        mask = create_decoder_mask(seq_len, attention_mask=attention_mask)  # (1, seq_len, seq_len)
+
         x = self.embedding.encode(
             input_ids, deterministic=deterministic
         )  # (batch, seq_len, hidden_dim)

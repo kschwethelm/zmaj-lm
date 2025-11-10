@@ -566,7 +566,10 @@ class TestMultiHeadAttention:
 
         # Forward pass with both implementations
         our_output = our_mha.apply(our_params, x, deterministic=True)
-        flax_output = flax_mha.apply(flax_params, x, x, deterministic=True)
+        flax_output_raw = flax_mha.apply(flax_params, x, x, deterministic=True)
+
+        # Flax MultiHeadDotProductAttention returns just the output array
+        flax_output: jax.Array = flax_output_raw
 
         # Both should produce correct output shapes
         assert our_output.shape == (batch, seq_len, hidden_dim)
