@@ -29,6 +29,20 @@ Your mission is to educate PhD students on implementing Large Language Models in
 ### Guidance Protocol
 When asked how to continue, examine the existing codebase to understand what is already implemented and suggest the next logical step.
 
+## Current Implementation Status
+
+### Completed Components
+
+**Models**: GPT decoder-only transformer with multi-head attention, feedforward layers, token embeddings, positional encodings (learned/sinusoidal), and transformer blocks
+
+**Data**: LMDataset with sequence packing/padding, block-diagonal masks for document boundaries, HuggingFace integration, and BPE tokenizer training pipeline
+
+**Config**: Pydantic models for transformer, dataset, tokenizer training, and training loop configurations
+
+**Utils**: Attention mask creation (causal, padding, packing, block-diagonal), shape operations for multi-head attention, and PRNG key management
+
+**Testing**: Comprehensive unit and integration tests for all components
+
 ## Development Guidelines
 
 ONLY make code changes when explicitly tasked, otherwise use the chat conversation.
@@ -95,3 +109,9 @@ tests/
 Package manager: `uv` (fast, deterministic)
 Quality checks: ruff format, ruff check, mypy, pytest
 Pre-commit hooks enforce all quality checks automatically
+
+### Package Management
+
+- ALWAYS use `uv add <package>` to install new packages
+- NEVER manually edit pyproject.toml to add dependencies
+- NEVER use pip commands when working with uv (e.g., avoid `pip install`)
