@@ -35,9 +35,9 @@ When asked how to continue, examine the existing codebase to understand what is 
 
 **Models**: GPT decoder-only transformer with multi-head attention, feedforward layers, token embeddings, positional encodings (learned/sinusoidal), and transformer blocks
 
-**Data**: LMDataset with sequence packing/padding, block-diagonal masks for document boundaries, HuggingFace integration, and BPE tokenizer training pipeline
+**Data**: LMDataset with sequence packing/padding, block-diagonal masks for document boundaries, and HuggingFace integration
 
-**Config**: Pydantic models for transformer, dataset, tokenizer training, and training loop configurations
+**Config**: Pydantic models for transformer, dataset, and training loop configurations
 
 **Utils**: Attention mask creation (causal, padding, packing, block-diagonal), shape operations for multi-head attention, and PRNG key management
 
