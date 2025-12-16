@@ -1,6 +1,4 @@
-import jax
-import jax.numpy as jnp
-from jax import Array
+import torch
 
 from zmaj_lm.config.model_config import TransformerConfig
 from zmaj_lm.models.transformer_block import TransformerBlock
@@ -10,7 +8,7 @@ from zmaj_lm.utils.masks import create_causal_mask
 class TestTransformerBlock:
     """Test suite for TransformerBlock module."""
 
-    def test_output_shape(self, rng_key: Array) -> None:
+    def test_output_shape(self, device: torch.device) -> None:
         """Test that TransformerBlock preserves input shape."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -22,19 +20,20 @@ class TestTransformerBlock:
         )
 
         batch, seq_len = 2, 16
-        key1, key2 = jax.random.split(rng_key)
 
-        block = TransformerBlock(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
+        block = TransformerBlock(config=config).to(device)
+        block.eval()
 
-        params = block.init(key2, x, deterministic=True)
-        output = block.apply(params, x, deterministic=True)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output = block(x)
 
         assert output.shape == (batch, seq_len, config.hidden_dim)
-        assert not jnp.any(jnp.isnan(output))
-        assert not jnp.any(jnp.isinf(output))
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isinf(output))
 
-    def test_with_causal_mask(self, rng_key: Array) -> None:
+    def test_with_causal_mask(self, device: torch.device) -> None:
         """Test TransformerBlock with causal mask."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -46,21 +45,22 @@ class TestTransformerBlock:
         )
 
         batch, seq_len = 2, 8
-        key1, key2 = jax.random.split(rng_key)
 
-        block = TransformerBlock(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
-        mask = create_causal_mask(seq_len)
+        block = TransformerBlock(config=config).to(device)
+        block.eval()
 
-        params = block.init(key2, x, mask=mask, deterministic=True)
-        output = block.apply(params, x, mask=mask, deterministic=True)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        mask = create_causal_mask(seq_len, device=device)
+
+        with torch.no_grad():
+            output = block(x, mask=mask)
 
         assert output.shape == (batch, seq_len, config.hidden_dim)
-        assert not jnp.any(jnp.isnan(output))
-        assert not jnp.any(jnp.isinf(output))
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isinf(output))
 
-    def test_deterministic_vs_training(self, rng_key: Array) -> None:
-        """Test that deterministic mode is consistent and training mode varies with dropout."""
+    def test_deterministic_vs_training(self, device: torch.device) -> None:
+        """Test that eval mode is consistent and training mode varies with dropout."""
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
@@ -74,24 +74,26 @@ class TestTransformerBlock:
         )
 
         batch, seq_len = 2, 8
-        key1, key2, key3, key4 = jax.random.split(rng_key, 4)
 
-        block = TransformerBlock(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
+        block = TransformerBlock(config=config).to(device)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
 
-        params = block.init(key2, x, deterministic=True)
-
-        # Deterministic mode should give same output every time
-        output1 = block.apply(params, x, deterministic=True)
-        output2 = block.apply(params, x, deterministic=True)
-        assert jnp.allclose(output1, output2)
+        # Eval mode should give same output every time
+        block.eval()
+        with torch.no_grad():
+            output1 = block(x)
+            output2 = block(x)
+        assert torch.allclose(output1, output2)
 
         # Training mode with dropout should give different outputs
-        output3 = block.apply(params, x, deterministic=False, rngs={"dropout": key3})
-        output4 = block.apply(params, x, deterministic=False, rngs={"dropout": key4})
-        assert not jnp.allclose(output3, output4)
+        block.train()
+        torch.manual_seed(42)
+        output3 = block(x)
+        torch.manual_seed(43)
+        output4 = block(x)
+        assert not torch.allclose(output3, output4)
 
-    def test_gradient_flow(self, rng_key: Array) -> None:
+    def test_gradient_flow(self, device: torch.device) -> None:
         """Test that gradients flow through residual connections."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -104,31 +106,30 @@ class TestTransformerBlock:
         )
 
         batch, seq_len = 2, 4
-        key1, key2 = jax.random.split(rng_key)
 
-        block = TransformerBlock(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
+        block = TransformerBlock(config=config).to(device)
+        block.train()
 
-        params = block.init(key2, x, deterministic=True)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device, requires_grad=True)
 
-        # Define a simple loss function
-        def loss_fn(params: Array, x: Array) -> Array:
-            output = block.apply(params, x, deterministic=True)
-            return jnp.sum(output**2)
+        # Forward pass
+        output = block(x)
 
-        # Compute gradients
-        grads = jax.grad(loss_fn)(params, x)
+        # Simple loss function
+        loss = (output**2).sum()
+
+        # Backward pass
+        loss.backward()
 
         # Check that all parameters have non-zero gradients
-        grad_leaves = jax.tree.leaves(grads)
-        for grad in grad_leaves:
-            # Gradients should exist and not be all zeros
-            assert not jnp.all(grad == 0.0)
-            assert not jnp.any(jnp.isnan(grad))
-            assert not jnp.any(jnp.isinf(grad))
+        for name, param in block.named_parameters():
+            assert param.grad is not None, f"No gradient for {name}"
+            assert not torch.all(param.grad == 0.0), f"Zero gradient for {name}"
+            assert not torch.any(torch.isnan(param.grad)), f"NaN gradient for {name}"
+            assert not torch.any(torch.isinf(param.grad)), f"Inf gradient for {name}"
 
-    def test_jit_compilation(self, rng_key: Array) -> None:
-        """Test that TransformerBlock can be JIT compiled."""
+    def test_compilation(self, device: torch.device) -> None:
+        """Test that TransformerBlock can be compiled."""
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
@@ -139,19 +140,17 @@ class TestTransformerBlock:
         )
 
         batch, seq_len = 2, 8
-        key1, key2 = jax.random.split(rng_key)
 
-        block = TransformerBlock(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
+        block = TransformerBlock(config=config).to(device)
+        block.eval()
 
-        params = block.init(key2, x, deterministic=True)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
 
-        # Create JIT-compiled apply function
-        @jax.jit
-        def apply_jit(params: Array, x: Array) -> Array:
-            return block.apply(params, x, deterministic=True)
+        # Compile the module
+        compiled_block = torch.compile(block)
 
-        output_jit = apply_jit(params, x)
-        output_regular = block.apply(params, x, deterministic=True)
+        with torch.no_grad():
+            output_compiled = compiled_block(x)
+            output_regular = block(x)
 
-        assert jnp.allclose(output_jit, output_regular, rtol=1e-5, atol=1e-5)
+        assert torch.allclose(output_compiled, output_regular, rtol=1e-5, atol=1e-5)

@@ -1,8 +1,4 @@
-from typing import Any
-
-import jax
-import jax.numpy as jnp
-from jax import Array
+import torch
 
 from zmaj_lm.config.model_config import TransformerConfig
 from zmaj_lm.models.gpt import GPTModel
@@ -11,7 +7,7 @@ from zmaj_lm.models.gpt import GPTModel
 class TestGPTModel:
     """Test suite for GPTModel (complete transformer)."""
 
-    def test_output_shape(self, rng_key: Array) -> None:
+    def test_output_shape(self, device: torch.device) -> None:
         """Test that GPT model produces correct output shape (logits over vocabulary)."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -23,19 +19,20 @@ class TestGPTModel:
         )
 
         batch, seq_len = 2, 64
-        key1, key2 = jax.random.split(rng_key)
 
-        model = GPTModel(config=config)
-        input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
+        model = GPTModel(config=config).to(device)
+        model.eval()
 
-        params = model.init(key2, input_ids, deterministic=True)
-        logits = model.apply(params, input_ids, deterministic=True)
+        input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
+
+        with torch.no_grad():
+            logits = model(input_ids)
 
         assert logits.shape == (batch, seq_len, config.vocab_size)
-        assert not jnp.any(jnp.isnan(logits))
-        assert not jnp.any(jnp.isinf(logits))
+        assert not torch.any(torch.isnan(logits))
+        assert not torch.any(torch.isinf(logits))
 
-    def test_causal_masking(self, rng_key: Array) -> None:
+    def test_causal_masking(self, device: torch.device) -> None:
         """Test that model applies causal masking (future tokens don't affect past)."""
         config = TransformerConfig(
             vocab_size=100,
@@ -47,25 +44,29 @@ class TestGPTModel:
         )
 
         batch, seq_len = 1, 8
-        key1, key2 = jax.random.split(rng_key)
 
-        model = GPTModel(config=config)
-        input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
+        model = GPTModel(config=config).to(device)
+        model.eval()
 
-        params = model.init(key2, input_ids, deterministic=True)
+        torch.manual_seed(42)
+        input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
 
         # Get predictions for full sequence
-        logits_full = model.apply(params, input_ids, deterministic=True)
+        with torch.no_grad():
+            logits_full = model(input_ids)
 
         # Get predictions for truncated sequence (first 5 tokens)
         input_ids_truncated = input_ids[:, :5]
-        logits_truncated = model.apply(params, input_ids_truncated, deterministic=True)
+        with torch.no_grad():
+            logits_truncated = model(input_ids_truncated)
 
         # Due to causal masking, predictions for first 5 positions should be identical
         # (they don't see the last 3 tokens anyway)
-        assert jnp.allclose(logits_full[:, :5, :], logits_truncated[:, :5, :], rtol=1e-5, atol=1e-5)
+        assert torch.allclose(
+            logits_full[:, :5, :], logits_truncated[:, :5, :], rtol=1e-5, atol=1e-5
+        )
 
-    def test_parameter_count(self, rng_key: Array) -> None:
+    def test_parameter_count(self, device: torch.device) -> None:
         """Test total parameter count matches expected for the architecture."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -78,13 +79,7 @@ class TestGPTModel:
             use_bias=True,
         )
 
-        batch, seq_len = 2, 32
-        key1, key2 = jax.random.split(rng_key)
-
-        model = GPTModel(config=config)
-        input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
-
-        params = model.init(key2, input_ids, deterministic=True)
+        model = GPTModel(config=config).to(device)
 
         # Calculate expected parameters
         # Token embeddings: vocab_size × hidden_dim
@@ -118,10 +113,10 @@ class TestGPTModel:
             token_embed_params + pos_embed_params + transformer_params + final_norm_params
         )
 
-        total_params = sum(p.size for p in jax.tree.leaves(params))
+        total_params = sum(p.numel() for p in model.parameters())
         assert total_params == expected_total
 
-    def test_deterministic_vs_training_mode(self, rng_key: Array) -> None:
+    def test_deterministic_vs_training_mode(self, device: torch.device) -> None:
         """Test that deterministic mode is consistent and training mode varies due to dropout."""
         config = TransformerConfig(
             vocab_size=500,
@@ -133,24 +128,27 @@ class TestGPTModel:
         )
 
         batch, seq_len = 2, 32
-        key1, key2, key3, key4 = jax.random.split(rng_key, 4)
 
-        model = GPTModel(config=config)
-        input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
+        model = GPTModel(config=config).to(device)
+        torch.manual_seed(42)
+        input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
 
-        params = model.init(key2, input_ids, deterministic=True)
-
-        # Deterministic mode should give same output
-        logits1 = model.apply(params, input_ids, deterministic=True)
-        logits2 = model.apply(params, input_ids, deterministic=True)
-        assert jnp.allclose(logits1, logits2)
+        # Eval mode should give same output
+        model.eval()
+        with torch.no_grad():
+            logits1 = model(input_ids)
+            logits2 = model(input_ids)
+        assert torch.allclose(logits1, logits2)
 
         # Training mode with dropout should give different outputs
-        logits3 = model.apply(params, input_ids, deterministic=False, rngs={"dropout": key3})
-        logits4 = model.apply(params, input_ids, deterministic=False, rngs={"dropout": key4})
-        assert not jnp.allclose(logits3, logits4)
+        model.train()
+        torch.manual_seed(42)
+        logits3 = model(input_ids)
+        torch.manual_seed(43)
+        logits4 = model(input_ids)
+        assert not torch.allclose(logits3, logits4)
 
-    def test_variable_sequence_lengths(self, rng_key: Array) -> None:
+    def test_variable_sequence_lengths(self, device: torch.device) -> None:
         """Test that model handles different sequence lengths."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -161,21 +159,18 @@ class TestGPTModel:
         )
 
         batch = 2
-        key1, key2 = jax.random.split(rng_key)
 
-        model = GPTModel(config=config)
-
-        # Initialize with one sequence length
-        input_ids_init = jax.random.randint(key1, (batch, 64), 0, config.vocab_size)
-        params = model.init(key2, input_ids_init, deterministic=True)
+        model = GPTModel(config=config).to(device)
+        model.eval()
 
         # Test various sequence lengths
         for seq_len in [8, 16, 32, 64, 128, 256]:
-            input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
-            logits = model.apply(params, input_ids, deterministic=True)
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
+            with torch.no_grad():
+                logits = model(input_ids)
             assert logits.shape == (batch, seq_len, config.vocab_size)
 
-    def test_different_configs(self, rng_key: Array) -> None:
+    def test_different_configs(self, device: torch.device) -> None:
         """Test that model works with different configuration options."""
         configs = [
             # Small model with sinusoidal positions
@@ -201,17 +196,18 @@ class TestGPTModel:
         batch, seq_len = 2, 32
 
         for config in configs:
-            key1, key2 = jax.random.split(rng_key)
-            model = GPTModel(config=config)
-            input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
+            model = GPTModel(config=config).to(device)
+            model.eval()
 
-            params = model.init(key2, input_ids, deterministic=True)
-            logits = model.apply(params, input_ids, deterministic=True)
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
+
+            with torch.no_grad():
+                logits = model(input_ids)
 
             assert logits.shape == (batch, seq_len, config.vocab_size)
-            assert not jnp.any(jnp.isnan(logits))
+            assert not torch.any(torch.isnan(logits))
 
-    def test_gradient_flow(self, rng_key: Array) -> None:
+    def test_gradient_flow(self, device: torch.device) -> None:
         """Test that gradients flow through the entire model."""
         config = TransformerConfig(
             vocab_size=100,
@@ -223,33 +219,31 @@ class TestGPTModel:
         )
 
         batch, seq_len = 2, 16
-        key1, key2 = jax.random.split(rng_key)
 
-        model = GPTModel(config=config)
-        input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
+        model = GPTModel(config=config).to(device)
+        model.train()
 
-        params = model.init(key2, input_ids, deterministic=True)
+        input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
 
-        # Define a simple loss function
-        def loss_fn(params: Any) -> Array:
-            logits = model.apply(params, input_ids, deterministic=True)
-            # Mean squared error with dummy target
-            return jnp.mean(logits**2)
+        # Forward pass
+        logits = model(input_ids)
 
-        # Compute gradients
-        loss, grads = jax.value_and_grad(loss_fn)(params)
+        # Simple loss function (mean squared error)
+        loss = (logits**2).mean()
+
+        # Backward pass
+        loss.backward()
 
         # Check that gradients exist and are non-zero for all parameters
-        def check_grads(grad_tree: Any) -> None:
-            for leaf in jax.tree.leaves(grad_tree):
-                assert not jnp.all(leaf == 0), "Some gradients are zero"
-                assert not jnp.any(jnp.isnan(leaf)), "Some gradients are NaN"
+        for name, param in model.named_parameters():
+            assert param.grad is not None, f"No gradient for {name}"
+            assert not torch.all(param.grad == 0), f"Zero gradient for {name}"
+            assert not torch.any(torch.isnan(param.grad)), f"NaN gradient for {name}"
 
-        check_grads(grads)
-        assert not jnp.isnan(loss)
+        assert not torch.isnan(loss)
 
-    def test_jit_compilation(self, rng_key: Array) -> None:
-        """Test that model can be JIT compiled."""
+    def test_compilation(self, device: torch.device) -> None:
+        """Test that model can be compiled with torch.compile."""
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=256,
@@ -259,24 +253,22 @@ class TestGPTModel:
         )
 
         batch, seq_len = 2, 32
-        key1, key2 = jax.random.split(rng_key)
 
-        model = GPTModel(config=config)
-        input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
+        model = GPTModel(config=config).to(device)
+        model.eval()
 
-        params = model.init(key2, input_ids, deterministic=True)
+        input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
 
-        # Create JIT-compiled forward pass
-        @jax.jit
-        def forward_jit(params: Any, input_ids: Array) -> Array:
-            return model.apply(params, input_ids, deterministic=True)
+        # Compile the model
+        compiled_model = torch.compile(model)
 
-        logits_jit = forward_jit(params, input_ids)
-        logits_regular = model.apply(params, input_ids, deterministic=True)
+        with torch.no_grad():
+            logits_compiled = compiled_model(input_ids)
+            logits_regular = model(input_ids)
 
-        assert jnp.allclose(logits_jit, logits_regular, rtol=1e-5, atol=1e-5)
+        assert torch.allclose(logits_compiled, logits_regular, rtol=1e-5, atol=1e-5)
 
-    def test_batch_size_one(self, rng_key: Array) -> None:
+    def test_batch_size_one(self, device: torch.device) -> None:
         """Test that model works with batch size of 1."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -287,18 +279,19 @@ class TestGPTModel:
         )
 
         batch, seq_len = 1, 32
-        key1, key2 = jax.random.split(rng_key)
 
-        model = GPTModel(config=config)
-        input_ids = jax.random.randint(key1, (batch, seq_len), 0, config.vocab_size)
+        model = GPTModel(config=config).to(device)
+        model.eval()
 
-        params = model.init(key2, input_ids, deterministic=True)
-        logits = model.apply(params, input_ids, deterministic=True)
+        input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
+
+        with torch.no_grad():
+            logits = model(input_ids)
 
         assert logits.shape == (batch, seq_len, config.vocab_size)
-        assert not jnp.any(jnp.isnan(logits))
+        assert not torch.any(torch.isnan(logits))
 
-    def test_positional_encoding_integration(self, rng_key: Array) -> None:
+    def test_positional_encoding_integration(self, device: torch.device) -> None:
         """Test that different positional encodings are properly integrated."""
         batch, seq_len = 2, 32
 
@@ -313,18 +306,18 @@ class TestGPTModel:
                 dropout_rate=0.0,
             )
 
-            key1, key2 = jax.random.split(rng_key)
-            model = GPTModel(config=config)
+            model = GPTModel(config=config).to(device)
+            model.eval()
 
             # Same tokens at different positions should give different predictions
-            input_ids = jnp.full((batch, seq_len), fill_value=5)  # All token ID 5
+            input_ids = torch.full((batch, seq_len), fill_value=5, device=device)
 
-            params = model.init(key2, input_ids, deterministic=True)
-            logits = model.apply(params, input_ids, deterministic=True)
+            with torch.no_grad():
+                logits = model(input_ids)
 
             # First and last position should have different predictions
             # (even though input tokens are the same)
             first_pos_logits = logits[0, 0, :]
             last_pos_logits = logits[0, -1, :]
 
-            assert not jnp.allclose(first_pos_logits, last_pos_logits, rtol=0.1)
+            assert not torch.allclose(first_pos_logits, last_pos_logits, rtol=0.1)

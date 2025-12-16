@@ -1,7 +1,7 @@
-import jax
+import torch
 
 
-def split_heads(x: jax.Array, n_heads: int) -> jax.Array:
+def split_heads(x: torch.Tensor, n_heads: int) -> torch.Tensor:
     """Split last dimension of `x` into `n_heads` heads.
 
     Args:
@@ -18,7 +18,7 @@ def split_heads(x: jax.Array, n_heads: int) -> jax.Array:
     return x
 
 
-def split_heads_transposed(x: jax.Array, n_heads: int) -> jax.Array:
+def split_heads_transposed(x: torch.Tensor, n_heads: int) -> torch.Tensor:
     """Split last dimension of `x` into `n_heads` heads and transpose for attention.
 
     Args:
@@ -29,10 +29,10 @@ def split_heads_transposed(x: jax.Array, n_heads: int) -> jax.Array:
         Array of shape (batch, n_heads, seq_len, d_head) where d_head = d_model // n_heads.
         The transpose places n_heads before seq_len for efficient batched attention.
     """
-    return split_heads(x, n_heads).transpose(0, 2, 1, 3)
+    return split_heads(x, n_heads).permute(0, 2, 1, 3)
 
 
-def merge_heads(x: jax.Array) -> jax.Array:
+def merge_heads(x: torch.Tensor) -> torch.Tensor:
     """Merge heads dimension back into last dimension.
 
     Args:
@@ -47,7 +47,7 @@ def merge_heads(x: jax.Array) -> jax.Array:
     return x
 
 
-def merge_heads_transposed(x: jax.Array) -> jax.Array:
+def merge_heads_transposed(x: torch.Tensor) -> torch.Tensor:
     """Merge heads from transposed layout back into last dimension.
 
     Args:
@@ -58,7 +58,7 @@ def merge_heads_transposed(x: jax.Array) -> jax.Array:
     """
     batch, n_heads, seq_len, d_head = x.shape
     # Transpose back: [B, H, L, D] → [B, L, H, D]
-    x = x.transpose(0, 2, 1, 3)
+    x = x.permute(0, 2, 1, 3)
     # Merge: [B, L, H, D] → [B, L, H*D]
     d_model = n_heads * d_head
     x = x.reshape(batch, seq_len, d_model)
@@ -66,7 +66,7 @@ def merge_heads_transposed(x: jax.Array) -> jax.Array:
 
 
 def assert_shape(
-    x: jax.Array, expected_shape: tuple[int | None, ...], name: str = "tensor"
+    x: torch.Tensor, expected_shape: tuple[int | None, ...], name: str = "tensor"
 ) -> None:
     """Assert that `x` has the expected shape.
 
@@ -90,7 +90,7 @@ def assert_shape(
             )
 
 
-def shape_str(x: jax.Array, name: str = "") -> str:
+def shape_str(x: torch.Tensor, name: str = "") -> str:
     """Format shape as readable string for logging.
 
     Args:

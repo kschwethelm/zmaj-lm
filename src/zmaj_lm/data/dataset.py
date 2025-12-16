@@ -1,13 +1,11 @@
 from collections.abc import Iterator
 
 import datasets as ds
-import jax
-import jax.numpy as jnp
+import torch
 from transformers import AutoTokenizer
 
 from zmaj_lm.config.dataset_config import DatasetConfig
 from zmaj_lm.utils.masks import create_block_diagonal_mask, create_packing_mask
-from zmaj_lm.utils.prng import key_generator
 
 
 class LMDataset:
@@ -26,7 +24,7 @@ class LMDataset:
 
     def __init__(
         self,
-        token_ids: list[jax.Array],
+        token_ids: list[torch.Tensor],
         seq_len: int,
         batch_size: int,
         use_packing: bool = True,
@@ -41,17 +39,17 @@ class LMDataset:
         self.padding_token = padding_token
         self.prevent_cross_doc_attention = prevent_cross_doc_attention
         self.shuffle = shuffle
-        self.key_gen = key_generator(jax.random.PRNGKey(seed))
+        self.generator = torch.Generator()
+        self.generator.manual_seed(seed)
 
         # Shuffle documents before packing/padding to avoid ordering biases
         # This ensures documents from similar topics/sources aren't packed together
         if shuffle:
-            shuffle_key = next(self.key_gen)
-            doc_indices = jax.random.permutation(shuffle_key, jnp.arange(len(token_ids)))
+            doc_indices = torch.randperm(len(token_ids), generator=self.generator)
             token_ids = [token_ids[int(i)] for i in doc_indices]
 
         # Preprocess: chunk sequences and create masks
-        self.doc_ids: jax.Array | None
+        self.doc_ids: torch.Tensor | None
         if use_packing:
             if prevent_cross_doc_attention:
                 self.chunks, self.doc_ids, self.attention_masks = (
@@ -66,7 +64,7 @@ class LMDataset:
 
         self.num_batches = len(self.chunks) // batch_size
 
-    def _pack_sequences(self, token_ids: list[jax.Array]) -> tuple[jax.Array, jax.Array]:
+    def _pack_sequences(self, token_ids: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Concatenate all sequences and chunk into fixed lengths.
 
         This maximizes GPU utilization by removing padding, but documents
@@ -78,19 +76,19 @@ class LMDataset:
             - chunks: Token ID arrays of shape (num_chunks, seq_len)
             - attention_masks: All-True mask of shape (num_chunks, seq_len), dtype bool
         """
-        all_tokens = jnp.concatenate(token_ids)
+        all_tokens = torch.cat(token_ids)
         num_chunks = len(all_tokens) // self.seq_len
         # Reshape into chunks, dropping incomplete final chunk
         chunks = all_tokens[: num_chunks * self.seq_len].reshape(-1, self.seq_len)
 
         # Create all-ones attention mask using utility function
-        attention_masks = create_packing_mask(num_chunks, self.seq_len, dtype=jnp.bool_)
+        attention_masks = create_packing_mask(num_chunks, self.seq_len, device=torch.device("cpu"))
 
         return chunks, attention_masks
 
     def _pack_sequences_with_boundaries(
-        self, token_ids: list[jax.Array]
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        self, token_ids: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Concatenate sequences and track document boundaries for block-diagonal attention.
 
         Returns:
@@ -101,13 +99,13 @@ class LMDataset:
             - attention_masks: Block-diagonal masks of shape (num_chunks, seq_len, seq_len), dtype bool
         """
         # Concatenate all sequences
-        all_tokens = jnp.concatenate(token_ids)
+        all_tokens = torch.cat(token_ids)
 
         # Track which document each token belongs to
         doc_ids_list: list[int] = []
         for doc_idx, seq in enumerate(token_ids):
             doc_ids_list.extend([doc_idx] * len(seq))
-        doc_ids_array = jnp.array(doc_ids_list, dtype=jnp.int32)
+        doc_ids_array = torch.tensor(doc_ids_list, dtype=torch.int32)
 
         # Chunk into fixed lengths
         num_chunks = len(all_tokens) // self.seq_len
@@ -117,13 +115,13 @@ class LMDataset:
         doc_id_chunks = doc_ids_array[:total_tokens].reshape(-1, self.seq_len)
 
         # Create block-diagonal attention masks using utility function
-        attention_masks = create_block_diagonal_mask(doc_id_chunks, dtype=jnp.bool_)
+        attention_masks = create_block_diagonal_mask(doc_id_chunks, dtype=torch.bool)
 
         return chunks, doc_id_chunks, attention_masks
 
     def _pad_sequences(
-        self, token_ids: list[jax.Array], padding_token: int
-    ) -> tuple[jax.Array, jax.Array]:
+        self, token_ids: list[torch.Tensor], padding_token: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Pad or truncate each sequence to fixed length.
 
         Returns:
@@ -131,23 +129,24 @@ class LMDataset:
             - padded_sequences: Shape (num_sequences, seq_len)
             - attention_masks: Shape (num_sequences, seq_len), dtype bool (True for real tokens, False for padding)
         """
-        padded_sequences_list: list[jax.Array] = []
+        padded_sequences_list: list[torch.Tensor] = []
         for seq in token_ids:
             if len(seq) < self.seq_len:
-                padded_seq = jnp.pad(
-                    seq, (0, self.seq_len - len(seq)), constant_values=padding_token
+                # PyTorch pad: (left, right) for 1D
+                padded_seq = torch.nn.functional.pad(
+                    seq, (0, self.seq_len - len(seq)), value=padding_token
                 )
             else:
                 padded_seq = seq[: self.seq_len]
             padded_sequences_list.append(padded_seq)
 
-        padded_sequences = jnp.stack(padded_sequences_list)
+        padded_sequences = torch.stack(padded_sequences_list)
         # Create attention mask: True for real tokens, False for padding
-        attention_masks = (padded_sequences != padding_token).astype(jnp.bool_)
+        attention_masks = (padded_sequences != padding_token).to(torch.bool)
 
         return padded_sequences, attention_masks
 
-    def __iter__(self) -> Iterator[dict[str, jax.Array]]:
+    def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
         """Iterate over batches, yielding input-target pairs.
 
         Yields:
@@ -158,11 +157,10 @@ class LMDataset:
                     - 1D: Simple padding/packing mask (True for real tokens, False for padding)
                     - 2D: Block-diagonal mask for document boundaries (when prevent_cross_doc_attention=True)
         """
-        indices = jnp.arange(len(self.chunks))
+        indices = torch.arange(len(self.chunks))
         if self.shuffle:
-            # Use JAX random for shuffling with fresh key for each epoch
-            shuffle_key = next(self.key_gen)
-            indices = jax.random.permutation(shuffle_key, indices)
+            # Use PyTorch random for shuffling with generator for each epoch
+            indices = torch.randperm(len(self.chunks), generator=self.generator)
 
         for i in range(0, len(indices) - self.batch_size + 1, self.batch_size):
             batch_indices = indices[i : i + self.batch_size]
@@ -253,9 +251,13 @@ def create_dataloaders(config: DatasetConfig) -> tuple[LMDataset, LMDataset]:
     train_dataset = split_dataset["train"]
     val_dataset = split_dataset["test"]
 
-    # Extract token IDs as list of JAX arrays
-    train_token_ids = [jnp.array(example["input_ids"]) for example in train_dataset]
-    val_token_ids = [jnp.array(example["input_ids"]) for example in val_dataset]
+    # Extract token IDs as list of PyTorch tensors
+    train_token_ids = [
+        torch.tensor(example["input_ids"], dtype=torch.long) for example in train_dataset
+    ]
+    val_token_ids = [
+        torch.tensor(example["input_ids"], dtype=torch.long) for example in val_dataset
+    ]
 
     # Create dataloaders
     train_dataloader = LMDataset(

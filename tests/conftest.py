@@ -1,22 +1,24 @@
 """Pytest configuration and fixtures for zmaj-lm tests."""
 
-import jax
 import pytest
+import torch
 
 
 @pytest.fixture(scope="session")
-def jax_devices() -> list[jax.Device]:
-    """Return all available JAX devices."""
-    return jax.devices()
+def device() -> torch.device:
+    """Return the appropriate device (GPU if available, otherwise CPU)."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 @pytest.fixture(scope="session")
 def has_gpu() -> bool:
     """Return True if GPU devices are available."""
-    return any(d.platform == "gpu" for d in jax.devices())
+    return torch.cuda.is_available()
 
 
 @pytest.fixture
-def rng_key() -> jax.Array:
-    """Return a JAX random key for testing."""
-    return jax.random.PRNGKey(0)
+def rng_generator() -> torch.Generator:
+    """Return a PyTorch random generator with fixed seed for deterministic tests."""
+    generator = torch.Generator()
+    generator.manual_seed(42)
+    return generator

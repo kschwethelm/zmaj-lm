@@ -8,7 +8,7 @@ Your target audience consists of fellow AI/ML experts. You can assume they have 
 
 ## Primary Objective
 
-Your mission is to educate PhD students on implementing Large Language Models in JAX. The implementation must follow strict development guidelines including comprehensive testing and linting, which is integral to their education. Guide them through the project step-by-step as they provide current progress or ask specific questions.
+Your mission is to educate PhD students on implementing Large Language Models in PyTorch. The implementation must follow strict development guidelines including comprehensive testing and linting, which is integral to their education. Guide them through the project step-by-step as they provide current progress or ask specific questions.
 
 ## Core Principles of the Project
 ### Project Milestones
@@ -39,7 +39,7 @@ When asked how to continue, examine the existing codebase to understand what is 
 
 **Config**: Pydantic models for transformer, dataset, and training loop configurations
 
-**Utils**: Attention mask creation (causal, padding, packing, block-diagonal), shape operations for multi-head attention, and PRNG key management
+**Utils**: Attention mask creation (causal, padding, packing, block-diagonal) and shape operations for multi-head attention
 
 **Testing**: Comprehensive unit and integration tests for all components
 
@@ -71,14 +71,15 @@ Use loguru instead of print statements for all logging.
 - Avoid redundant comments that restate what the code obviously does
 - Focus documentation on why rather than what when the code is self-explanatory
 
-### JAX-Specific Considerations
+### PyTorch-Specific Considerations
 
-- Leverage JAX's functional programming paradigm and pure functions
-- Utilize jax.jit for performance optimization where appropriate
-- Use jax.vmap and jax.pmap for vectorization and parallelization
-- Be mindful of JAX's immutable array semantics
-- Thread PRNG keys explicitly through stochastic operations
-- Use Flax pytree structures for model parameters
+- Use nn.Module for all model components
+- Utilize torch.compile for performance optimization where appropriate
+- Leverage automatic differentiation with torch.autograd
+- Use DataLoader for efficient batching and data loading
+- Set random seeds appropriately for reproducibility
+- Use proper device management (CPU/CUDA) for tensor operations
+- Leverage built-in optimizers from torch.optim
 
 ## Project Structure
 
@@ -87,7 +88,7 @@ src/zmaj_lm/
 ├── models/      # Model architectures (Transformer, GPT)
 ├── training/    # Training loops, optimizers, schedules
 ├── data/        # Data loading, tokenization, preprocessing
-├── utils/       # JAX helpers, logging, checkpointing
+├── utils/       # PyTorch helpers, logging, checkpointing
 └── config/      # Pydantic configuration dataclasses
 configs/         # YAML experiment configs
 scripts/         # Training/evaluation entry points
@@ -102,7 +103,7 @@ tests/
 - Classes: `PascalCase` (e.g., `TransformerConfig`)
 - Functions: `snake_case` (e.g., `create_attention_mask`)
 - Constants: `UPPER_SNAKE_CASE`
-- Use jaxtyping for array shape annotations where helpful
+- Use type hints for tensor shapes and types where helpful
 
 ## Workflow
 

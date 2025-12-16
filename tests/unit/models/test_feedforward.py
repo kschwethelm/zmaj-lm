@@ -1,6 +1,4 @@
-import jax
-import jax.numpy as jnp
-from jax import Array
+import torch
 
 from zmaj_lm.config.model_config import TransformerConfig
 from zmaj_lm.models.feedforward import FeedForward
@@ -9,7 +7,7 @@ from zmaj_lm.models.feedforward import FeedForward
 class TestFeedForward:
     """Test suite for FeedForward (MLP) module."""
 
-    def test_output_shape(self, rng_key: Array) -> None:
+    def test_output_shape(self, device: torch.device) -> None:
         """Test that FFN preserves input shape (batch, seq_len, hidden_dim)."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -21,19 +19,20 @@ class TestFeedForward:
         )
 
         batch, seq_len = 2, 16
-        key1, key2 = jax.random.split(rng_key)
 
-        ffn = FeedForward(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
+        ffn = FeedForward(config=config).to(device)
+        ffn.eval()
 
-        params = ffn.init(key2, x, deterministic=True)
-        output = ffn.apply(params, x, deterministic=True)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output = ffn(x)
 
         assert output.shape == (batch, seq_len, config.hidden_dim)
-        assert not jnp.any(jnp.isnan(output))
-        assert not jnp.any(jnp.isinf(output))
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isinf(output))
 
-    def test_parameter_count(self, rng_key: Array) -> None:
+    def test_parameter_count(self, device: torch.device) -> None:
         """Test that parameter count matches expected for FFN."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -45,13 +44,7 @@ class TestFeedForward:
             use_bias=True,
         )
 
-        batch, seq_len = 2, 8
-        key1, key2 = jax.random.split(rng_key)
-
-        ffn = FeedForward(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
-
-        params = ffn.init(key2, x, deterministic=True)
+        ffn = FeedForward(config=config).to(device)
 
         # First layer: (hidden_dim -> mlp_dim) + mlp_dim bias
         # Second layer: (mlp_dim -> hidden_dim) + hidden_dim bias
@@ -62,11 +55,11 @@ class TestFeedForward:
             + config.hidden_dim
         )
 
-        total_params = sum(x.size for x in jax.tree.leaves(params))
+        total_params = sum(p.numel() for p in ffn.parameters())
         assert total_params == expected_total
 
-    def test_deterministic_vs_training(self, rng_key: Array) -> None:
-        """Test that deterministic mode produces consistent outputs and training mode applies dropout."""
+    def test_deterministic_vs_training(self, device: torch.device) -> None:
+        """Test that eval mode produces consistent outputs and training mode applies dropout."""
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
@@ -78,24 +71,26 @@ class TestFeedForward:
         )
 
         batch, seq_len = 2, 8
-        key1, key2, key3, key4 = jax.random.split(rng_key, 4)
 
-        ffn = FeedForward(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
+        ffn = FeedForward(config=config).to(device)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
 
-        params = ffn.init(key2, x, deterministic=True)
-
-        # Deterministic mode should give same output every time
-        output1 = ffn.apply(params, x, deterministic=True)
-        output2 = ffn.apply(params, x, deterministic=True)
-        assert jnp.allclose(output1, output2)
+        # Eval mode should give same output every time
+        ffn.eval()
+        with torch.no_grad():
+            output1 = ffn(x)
+            output2 = ffn(x)
+        assert torch.allclose(output1, output2)
 
         # Training mode with dropout should give different outputs
-        output3 = ffn.apply(params, x, deterministic=False, rngs={"dropout": key3})
-        output4 = ffn.apply(params, x, deterministic=False, rngs={"dropout": key4})
-        assert not jnp.allclose(output3, output4)
+        ffn.train()
+        torch.manual_seed(42)
+        output3 = ffn(x)
+        torch.manual_seed(43)
+        output4 = ffn(x)
+        assert not torch.allclose(output3, output4)
 
-    def test_activation_nonlinearity(self, rng_key: Array) -> None:
+    def test_activation_nonlinearity(self, device: torch.device) -> None:
         """Test that FFN applies nonlinear activation (GELU)."""
         config = TransformerConfig(
             vocab_size=1000,
@@ -107,26 +102,26 @@ class TestFeedForward:
             dropout_rate=0.0,
         )
 
-        key1, key2 = jax.random.split(rng_key)
+        ffn = FeedForward(config=config).to(device)
+        ffn.eval()
 
-        ffn = FeedForward(config=config)
         # Use a simple input pattern
-        x = jnp.ones((1, 4, config.hidden_dim))
+        x = torch.ones((1, 4, config.hidden_dim), device=device)
 
-        params = ffn.init(key2, x, deterministic=True)
-        output = ffn.apply(params, x, deterministic=True)
+        with torch.no_grad():
+            output = ffn(x)
 
-        # If activation is working, output should not be a simple linear transformation
-        # We verify this by checking that FFN(2*x) != 2*FFN(x) (non-linear behavior)
-        x_scaled = 2.0 * x
-        output_scaled_input = ffn.apply(params, x_scaled, deterministic=True)
-        output_scaled = 2.0 * output
+            # If activation is working, output should not be a simple linear transformation
+            # We verify this by checking that FFN(2*x) != 2*FFN(x) (non-linear behavior)
+            x_scaled = 2.0 * x
+            output_scaled_input = ffn(x_scaled)
+            output_scaled = 2.0 * output
 
         # Due to GELU nonlinearity, these should NOT be equal
-        assert not jnp.allclose(output_scaled_input, output_scaled, rtol=0.01)
+        assert not torch.allclose(output_scaled_input, output_scaled, rtol=0.01)
 
-    def test_jit_compilation(self, rng_key: Array) -> None:
-        """Test that FFN can be JIT compiled."""
+    def test_compilation(self, device: torch.device) -> None:
+        """Test that FFN can be compiled."""
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
@@ -137,19 +132,17 @@ class TestFeedForward:
         )
 
         batch, seq_len = 2, 8
-        key1, key2 = jax.random.split(rng_key)
 
-        ffn = FeedForward(config=config)
-        x = jax.random.normal(key1, (batch, seq_len, config.hidden_dim))
+        ffn = FeedForward(config=config).to(device)
+        ffn.eval()
 
-        params = ffn.init(key2, x, deterministic=True)
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
 
-        # Create JIT-compiled apply function
-        @jax.jit
-        def apply_jit(params: Array, x: Array) -> Array:
-            return ffn.apply(params, x, deterministic=True)
+        # Compile the module
+        compiled_ffn = torch.compile(ffn)
 
-        output_jit = apply_jit(params, x)
-        output_regular = ffn.apply(params, x, deterministic=True)
+        with torch.no_grad():
+            output_compiled = compiled_ffn(x)
+            output_regular = ffn(x)
 
-        assert jnp.allclose(output_jit, output_regular, rtol=1e-5, atol=1e-5)
+        assert torch.allclose(output_compiled, output_regular, rtol=1e-5, atol=1e-5)

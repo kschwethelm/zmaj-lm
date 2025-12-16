@@ -1,31 +1,35 @@
-import flax.linen as nn
-import jax
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from zmaj_lm.config.model_config import TransformerConfig
 
 
 class FeedForward(nn.Module):
-    config: TransformerConfig
+    def __init__(self, config: TransformerConfig) -> None:
+        """Initialize the feedforward network.
 
-    def setup(self) -> None:
-        self.dense_1 = nn.Dense(self.config.mlp_dim, use_bias=self.config.use_bias)
-        self.dense_2 = nn.Dense(self.config.hidden_dim, use_bias=self.config.use_bias)
-        self.activation = nn.gelu
-        self.dropout = nn.Dropout(rate=self.config.dropout_rate, rng_collection="dropout")
+        Args:
+            config: Transformer configuration
+        """
+        super().__init__()
+        self.config = config
+        self.dense_1 = nn.Linear(config.hidden_dim, config.mlp_dim, bias=config.use_bias)
+        self.dense_2 = nn.Linear(config.mlp_dim, config.hidden_dim, bias=config.use_bias)
+        self.dropout = nn.Dropout(p=config.dropout_rate)
 
-    def __call__(self, x: jax.Array, deterministic: bool = False) -> jax.Array:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the feedforward network.
 
         Args:
             x: Input tensor of shape (batch, seq_len, hidden_dim)
-            deterministic: If True, disable dropout (for inference)
 
         Returns:
             Output tensor of shape (batch, seq_len, hidden_dim)
         """
         x = self.dense_1(x)
-        x = self.activation(x)
-        x = self.dropout(x, deterministic=deterministic)
+        x = F.gelu(x)
+        x = self.dropout(x)
         x = self.dense_2(x)
-        x = self.dropout(x, deterministic=deterministic)
+        x = self.dropout(x)
         return x

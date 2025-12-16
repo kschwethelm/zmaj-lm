@@ -1,6 +1,6 @@
-import flax.linen as nn
-import jax
-import jax.numpy as jnp
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from zmaj_lm.config.model_config import TransformerConfig
 from zmaj_lm.utils.masks import mask_to_bias
@@ -8,47 +8,45 @@ from zmaj_lm.utils.shapes import merge_heads_transposed, split_heads_transposed
 
 
 def scaled_dot_product_attention(
-    query: jax.Array,
-    key: jax.Array,
-    value: jax.Array,
-    mask: jax.Array | None = None,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    mask: torch.Tensor | None = None,
     dropout_rate: float = 0.0,
-    dropout_rng: jax.Array | None = None,
-) -> tuple[jax.Array, jax.Array]:
+    training: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute scaled dot-product attention.
 
     Formula: Attention(Q, K, V) = softmax((QK^T / √d_k) + M) V
 
     Args:
-        query: jax.Array of shape (batch, n_heads, seq_len_q, d_head)
-        key: jax.Array of shape (batch, n_heads, seq_len_k, d_head)
-        value: jax.Array of shape (batch, n_heads, seq_len_v, d_head)
-        mask: jax.Array broadcastable to (batch, 1, seq_len_q, seq_len_k), default is None
+        query: torch.Tensor of shape (batch, n_heads, seq_len_q, d_head)
+        key: torch.Tensor of shape (batch, n_heads, seq_len_k, d_head)
+        value: torch.Tensor of shape (batch, n_heads, seq_len_v, d_head)
+        mask: torch.Tensor broadcastable to (batch, 1, seq_len_q, seq_len_k), default is None
         dropout_rate: float, dropout rate to apply on attention weights
-        dropout_rng: jax.Array, random number generator for dropout <- required if dropout_rate > 0 and training
+        training: bool, whether the model is in training mode
 
     Returns:
         output: Attention output of shape (batch, n_heads, seq_len_q, d_head)
         attention_weights: Attention probabilities (batch, n_heads, seq_len_q, seq_len_k)
     """
     d_head = query.shape[-1]
-    # jnp.einsum('bhqd,bhkd->bhqk', q, k) for the matrix multiplication Q @ K^T
-    scores = jnp.einsum("bhqd,bhkd->bhqk", query, key) / jnp.sqrt(d_head)
+    # torch.einsum('bhqd,bhkd->bhqk', q, k) for the matrix multiplication Q @ K^T
+    scores = torch.einsum("bhqd,bhkd->bhqk", query, key) / torch.sqrt(
+        torch.tensor(d_head, dtype=query.dtype, device=query.device)
+    )
 
     if mask is not None:
         bias = mask_to_bias(mask, dtype=scores.dtype)
-        scores += bias
+        scores = scores + bias
 
-    attention_weights = jax.nn.softmax(scores, axis=-1)  # normalize over keys
+    attention_weights = F.softmax(scores, dim=-1)  # normalize over keys
 
-    if dropout_rate > 0.0 and dropout_rng is not None:
-        keep_prob = 1.0 - dropout_rate
-        dropout_mask = jax.random.bernoulli(dropout_rng, keep_prob, attention_weights.shape)
-        attention_weights = (
-            attention_weights * dropout_mask / keep_prob
-        )  # Scale to maintain expectation
+    if training and dropout_rate > 0.0:
+        attention_weights = F.dropout(attention_weights, p=dropout_rate, training=True)
 
-    output = jnp.einsum("bhqk,bhkd->bhqd", attention_weights, value)
+    output = torch.einsum("bhqk,bhkd->bhqd", attention_weights, value)
 
     return output, attention_weights
 
@@ -60,32 +58,35 @@ class MultiHeadAttention(nn.Module):
     then computes scaled dot-product attention across multiple heads in parallel.
     """
 
-    config: TransformerConfig
-    return_attention_weights: bool = False
+    def __init__(self, config: TransformerConfig, return_attention_weights: bool = False) -> None:
+        """Initialize the multi-head attention layer.
 
-    def setup(self) -> None:
-        """Initialize the linear projection layers.
+        Args:
+            config: Transformer configuration
+            return_attention_weights: Whether to return attention weights
 
         Note: For efficiency, Q/K/V projections could be fused into a single
         dense layer, but we keep them separate for clarity and modularity.
         """
-        self.q_proj = nn.Dense(self.config.hidden_dim, use_bias=self.config.use_bias, name="query")
-        self.k_proj = nn.Dense(self.config.hidden_dim, use_bias=self.config.use_bias, name="key")
-        self.v_proj = nn.Dense(self.config.hidden_dim, use_bias=self.config.use_bias, name="value")
-        self.out_proj = nn.Dense(self.config.hidden_dim, use_bias=self.config.use_bias, name="out")
+        super().__init__()
+        self.config = config
+        self.return_attention_weights = return_attention_weights
 
-    def __call__(
+        self.q_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
+        self.k_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
+        self.v_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
+        self.out_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
+
+    def forward(
         self,
-        x: jax.Array,
-        mask: jax.Array | None = None,
-        deterministic: bool = False,
-    ) -> jax.Array | tuple[jax.Array, jax.Array]:
+        x: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Apply multi-head self-attention.
 
         Args:
             x: Input tensor of shape (batch, seq_len, hidden_dim)
             mask: Optional attention mask, broadcastable to (batch, n_heads, seq_len, seq_len)
-            deterministic: If True, disable dropout (for inference)
 
         Returns:
             If return_attention_weights is False:
@@ -105,19 +106,14 @@ class MultiHeadAttention(nn.Module):
         value = split_heads_transposed(value, self.config.num_heads)
         # Shape after split: (batch, n_heads, seq_len, head_dim)
 
-        # Prepare dropout RNG key if needed
-        dropout_rng = None
-        if not deterministic and self.config.attention_dropout_rate > 0.0:
-            dropout_rng = self.make_rng("dropout")
-
         # Compute attention
         attn_output, attention_weights = scaled_dot_product_attention(
             query=query,
             key=key,
             value=value,
             mask=mask,
-            dropout_rate=self.config.attention_dropout_rate if not deterministic else 0.0,
-            dropout_rng=dropout_rng,
+            dropout_rate=self.config.attention_dropout_rate,
+            training=self.training,
         )
 
         # Merge attention heads
