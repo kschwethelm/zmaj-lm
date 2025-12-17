@@ -279,7 +279,7 @@ class TestTrainerIntegration:
             num_epochs=1,
             warmup_steps=2,
             log_every_n_steps=1,
-            scheduler_type="constant_with_warmup",
+            scheduler_type="constant",
         )
 
         trainer = Trainer(
@@ -354,6 +354,8 @@ class TestTrainerIntegration:
 
         trainer2.load_checkpoint(checkpoint_path)
 
-        # Check that state was restored
-        assert trainer2.global_step == trainer1.global_step
-        assert trainer2.current_epoch == trainer1.current_epoch
+        # Check that state was restored from the checkpoint (not final trainer1 state)
+        # Extract step number from checkpoint filename (e.g., "checkpoint_step_3.pt" -> 3)
+        checkpoint_step = int(checkpoint_path.stem.split("_")[-1])
+        assert trainer2.global_step == checkpoint_step
+        assert trainer2.current_epoch == 0  # Should be epoch 0 since checkpoint was saved early
