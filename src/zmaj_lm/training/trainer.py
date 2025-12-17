@@ -7,6 +7,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from transformers import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
 
 from zmaj_lm.config.training_config import TrainingConfig
@@ -237,7 +238,8 @@ class Trainer:
         total_loss = 0.0
         num_batches = 0
 
-        for batch in self.val_dataloader:
+        val_pbar = tqdm(self.val_dataloader, desc="Validation", leave=False)
+        for batch in val_pbar:
             input_ids = batch["input_ids"].to(self.device)
             target_ids = batch["target_ids"].to(self.device)
             attention_mask = batch["attention_mask"]
@@ -255,6 +257,15 @@ class Trainer:
 
             total_loss += loss.item()
             num_batches += 1
+
+            # Update progress bar with current average metrics
+            avg_loss = total_loss / num_batches
+            val_pbar.set_postfix(
+                {
+                    "loss": f"{avg_loss:.4f}",
+                    "ppl": f"{torch.exp(torch.tensor(avg_loss)).item():.2f}",
+                }
+            )
 
         avg_loss = total_loss / num_batches
         perplexity = torch.exp(torch.tensor(avg_loss)).item()
@@ -283,11 +294,18 @@ class Trainer:
         """Execute full training loop."""
         logger.info("Starting training...")
 
-        for epoch in range(self.num_epochs):
+        epoch_pbar = tqdm(range(self.num_epochs), desc="Epochs", position=0)
+        for epoch in epoch_pbar:
             self.current_epoch = epoch
             logger.info(f"Epoch {epoch + 1}/{self.num_epochs}")
 
-            for batch in self.train_dataloader:
+            batch_pbar = tqdm(
+                self.train_dataloader,
+                desc=f"Epoch {epoch + 1}/{self.num_epochs}",
+                position=1,
+                leave=False,
+            )
+            for batch in batch_pbar:
                 # Training step
                 metrics = self.train_step(batch)
                 self.global_step += 1
@@ -296,9 +314,18 @@ class Trainer:
                 if self.averaged_model is not None and self.global_step >= self.swa_start_step:
                     self.averaged_model.update_parameters(self.model)
 
+                # Update progress bar with live metrics
+                lr = self.scheduler.get_last_lr()[0]
+                batch_pbar.set_postfix(
+                    {
+                        "loss": f"{metrics['loss']:.4f}",
+                        "ppl": f"{metrics['perplexity']:.2f}",
+                        "lr": f"{lr:.2e}",
+                    }
+                )
+
                 # Log training metrics
                 if self.global_step % self.config.log_every_n_steps == 0:
-                    lr = self.scheduler.get_last_lr()[0]
                     logger.info(
                         f"Step {self.global_step}/{self.total_steps} | "
                         f"Loss: {metrics['loss']:.4f} | "
