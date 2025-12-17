@@ -5,6 +5,7 @@ import torch.nn as nn
 from loguru import logger
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
 
@@ -95,6 +96,34 @@ class Trainer:
 
         # Initialize learning rate scheduler
         self.scheduler = self._create_scheduler()
+
+        # Initialize SWA/EMA if requested
+        self.averaged_model: AveragedModel | None = None
+        if config.use_swa:
+            # Determine decay function: EMA if swa_decay is set, otherwise equal averaging (SWA)
+            if config.swa_decay is not None:
+                # EMA with decay
+                def ema_avg_fn(
+                    averaged_param: torch.Tensor,
+                    model_param: torch.Tensor,
+                    _num_averaged: torch.Tensor | int,
+                ) -> torch.Tensor:
+                    return config.swa_decay * averaged_param + (1 - config.swa_decay) * model_param
+
+                avg_fn = ema_avg_fn
+                logger.info(f"Initializing EMA with decay={config.swa_decay}")
+            else:
+                # Equal averaging (SWA)
+                avg_fn = None
+                logger.info("Initializing SWA with equal averaging")
+
+            self.averaged_model = AveragedModel(model, avg_fn=avg_fn)
+
+            # Determine when to start averaging
+            self.swa_start_step = (
+                config.swa_start_step if config.swa_start_step is not None else config.warmup_steps
+            )
+            logger.info(f"Weight averaging will start at step {self.swa_start_step}")
 
         # Initialize tracking variables
         self.global_step = 0
@@ -193,13 +222,18 @@ class Trainer:
     def validate(self) -> dict[str, float]:
         """Run validation loop.
 
+        Uses the averaged model if SWA/EMA is enabled and swa_eval is True.
+
         Returns:
             Dictionary with 'val_loss' and 'val_perplexity'
         """
         if self.val_dataloader is None:
             return {}
 
-        self.model.eval()
+        # Select model for evaluation
+        eval_model = self._get_eval_model()
+        eval_model.eval()
+
         total_loss = 0.0
         num_batches = 0
 
@@ -211,7 +245,7 @@ class Trainer:
                 attention_mask = attention_mask.to(self.device)
 
             # Forward pass
-            logits = self.model(input_ids, attention_mask=attention_mask)
+            logits = eval_model(input_ids, attention_mask=attention_mask)
 
             # Compute loss
             loss = self.loss_fn(
@@ -230,6 +264,21 @@ class Trainer:
             "val_perplexity": perplexity,
         }
 
+    def _get_eval_model(self) -> nn.Module:
+        """Get the model to use for evaluation.
+
+        Returns:
+            Averaged model if SWA/EMA is enabled and swa_eval is True,
+            otherwise the regular model.
+        """
+        if (
+            self.averaged_model is not None
+            and self.config.swa_eval
+            and self.global_step >= self.swa_start_step
+        ):
+            return self.averaged_model.module
+        return self.model
+
     def train(self) -> None:
         """Execute full training loop."""
         logger.info("Starting training...")
@@ -242,6 +291,10 @@ class Trainer:
                 # Training step
                 metrics = self.train_step(batch)
                 self.global_step += 1
+
+                # Update averaged model if SWA/EMA is enabled and we're past the start step
+                if self.averaged_model is not None and self.global_step >= self.swa_start_step:
+                    self.averaged_model.update_parameters(self.model)
 
                 # Log training metrics
                 if self.global_step % self.config.log_every_n_steps == 0:
@@ -307,6 +360,8 @@ class Trainer:
     def save_checkpoint(self, is_best: bool = False) -> None:
         """Save model checkpoint.
 
+        Includes averaged model state if SWA/EMA is enabled.
+
         Args:
             is_best: Whether this is the best model so far
         """
@@ -325,6 +380,10 @@ class Trainer:
             "config": self.config.model_dump(),
         }
 
+        # Include averaged model state if SWA/EMA is enabled
+        if self.averaged_model is not None:
+            checkpoint["averaged_model_state_dict"] = self.averaged_model.state_dict()
+
         # Save regular checkpoint
         checkpoint_path = self.checkpoint_dir / f"checkpoint_step_{self.global_step}.pt"
         torch.save(checkpoint, checkpoint_path)
@@ -339,6 +398,8 @@ class Trainer:
     def load_checkpoint(self, checkpoint_path: Path) -> None:
         """Load model checkpoint.
 
+        Loads averaged model state if present in checkpoint.
+
         Args:
             checkpoint_path: Path to checkpoint file
         """
@@ -351,5 +412,10 @@ class Trainer:
         self.global_step = checkpoint["global_step"]
         self.current_epoch = checkpoint["current_epoch"]
         self.best_val_loss = checkpoint["best_val_loss"]
+
+        # Load averaged model state if present
+        if self.averaged_model is not None and "averaged_model_state_dict" in checkpoint:
+            self.averaged_model.load_state_dict(checkpoint["averaged_model_state_dict"])
+            logger.info("Loaded averaged model state")
 
         logger.info(f"Resumed from step {self.global_step}, epoch {self.current_epoch}")

@@ -31,3 +31,9 @@ class TrainingConfig(BaseModel):
     use_wandb: bool = False
     wandb_project: str | None = None
     wandb_run_name: str | None = None
+
+    # Stochastic Weight Averaging / Exponential Moving Average
+    use_swa: bool = False  # Enable SWA/EMA
+    swa_decay: float | None = None  # EMA decay (e.g., 0.9999); None = equal averaging (SWA)
+    swa_start_step: int | None = None  # When to start averaging; None = after warmup
+    swa_eval: bool = True  # Use averaged model for validation

@@ -524,3 +524,292 @@ class TestCheckpointing:
         trainer.global_step = 100
         trainer.save_checkpoint(is_best=False)
         # Should not raise an error, just skip saving
+
+
+class TestSWAandEMA:
+    """Test Stochastic Weight Averaging and Exponential Moving Average functionality."""
+
+    def test_swa_initialization_equal_averaging(
+        self, small_model: nn.Module, dummy_dataloader: DataLoader, device: torch.device
+    ) -> None:
+        """Test SWA initialization with equal averaging."""
+        config = TrainingConfig(
+            use_swa=True,
+            swa_decay=None,  # Equal averaging
+            swa_start_step=10,
+            num_epochs=1,
+        )
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+        )
+
+        assert trainer.averaged_model is not None
+        assert trainer.swa_start_step == 10
+
+    def test_ema_initialization(
+        self, small_model: nn.Module, dummy_dataloader: DataLoader, device: torch.device
+    ) -> None:
+        """Test EMA initialization with decay factor."""
+        config = TrainingConfig(
+            use_swa=True,
+            swa_decay=0.9999,  # EMA with decay
+            swa_start_step=5,
+            num_epochs=1,
+        )
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+        )
+
+        assert trainer.averaged_model is not None
+        assert trainer.swa_start_step == 5
+
+    def test_swa_default_start_step(
+        self, small_model: nn.Module, dummy_dataloader: DataLoader, device: torch.device
+    ) -> None:
+        """Test that swa_start_step defaults to warmup_steps."""
+        warmup = 100
+        config = TrainingConfig(
+            use_swa=True,
+            warmup_steps=warmup,
+            swa_start_step=None,  # Should default to warmup_steps
+            num_epochs=1,
+        )
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+        )
+
+        assert trainer.swa_start_step == warmup
+
+    def test_swa_disabled_by_default(
+        self, small_model: nn.Module, dummy_dataloader: DataLoader, device: torch.device
+    ) -> None:
+        """Test that SWA is disabled by default."""
+        config = TrainingConfig(num_epochs=1)
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+        )
+
+        assert trainer.averaged_model is None
+
+    def test_averaged_model_updates_after_start_step(
+        self,
+        small_model: nn.Module,
+        dummy_dataloader: DataLoader,
+        training_config: TrainingConfig,
+        device: torch.device,
+    ) -> None:
+        """Test that averaged model is updated after swa_start_step."""
+        config = TrainingConfig(
+            use_swa=True,
+            swa_decay=None,
+            swa_start_step=2,  # Start averaging at step 2
+            num_epochs=1,
+            log_every_n_steps=100,
+            eval_every_n_steps=100,
+            checkpoint_every_n_steps=100,
+        )
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+        )
+
+        # Get initial averaged model parameters
+        initial_avg_params = [p.clone() for p in trainer.averaged_model.parameters()]
+
+        # Take one training step (global_step becomes 1, before swa_start_step)
+        batch = next(iter(dummy_dataloader))
+        trainer.train_step(batch)
+        trainer.global_step += 1
+
+        # Averaged model should NOT be updated yet
+        avg_params_after_step1 = list(trainer.averaged_model.parameters())
+        for initial, current in zip(initial_avg_params, avg_params_after_step1):
+            assert torch.allclose(initial, current, atol=1e-6)
+
+        # Take another training step (global_step becomes 2, at swa_start_step)
+        trainer.train_step(batch)
+        trainer.global_step += 1
+        trainer.averaged_model.update_parameters(trainer.model)
+
+        # Now averaged model SHOULD be updated
+        avg_params_after_step2 = list(trainer.averaged_model.parameters())
+        params_changed = False
+        for initial, current in zip(initial_avg_params, avg_params_after_step2):
+            if not torch.allclose(initial, current, atol=1e-6):
+                params_changed = True
+                break
+
+        assert params_changed, "Averaged model should update after swa_start_step"
+
+    def test_get_eval_model_with_swa(
+        self, small_model: nn.Module, dummy_dataloader: DataLoader, device: torch.device
+    ) -> None:
+        """Test that _get_eval_model returns averaged model when appropriate."""
+        config = TrainingConfig(
+            use_swa=True,
+            swa_eval=True,
+            swa_start_step=5,
+            num_epochs=1,
+        )
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+        )
+
+        # Before swa_start_step, should return regular model
+        trainer.global_step = 3
+        eval_model = trainer._get_eval_model()
+        assert eval_model is trainer.model
+
+        # After swa_start_step, should return averaged model
+        trainer.global_step = 10
+        eval_model = trainer._get_eval_model()
+        assert eval_model is trainer.averaged_model.module
+
+    def test_get_eval_model_without_swa_eval(
+        self, small_model: nn.Module, dummy_dataloader: DataLoader, device: torch.device
+    ) -> None:
+        """Test that _get_eval_model returns regular model when swa_eval=False."""
+        config = TrainingConfig(
+            use_swa=True,
+            swa_eval=False,  # Don't use averaged model for eval
+            swa_start_step=5,
+            num_epochs=1,
+        )
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+        )
+
+        # Even after swa_start_step, should return regular model
+        trainer.global_step = 10
+        eval_model = trainer._get_eval_model()
+        assert eval_model is trainer.model
+
+    def test_checkpoint_save_with_averaged_model(
+        self,
+        small_model: nn.Module,
+        dummy_dataloader: DataLoader,
+        device: torch.device,
+        tmp_path: Path,
+    ) -> None:
+        """Test that checkpoint includes averaged model state when SWA is enabled."""
+        config = TrainingConfig(
+            use_swa=True,
+            swa_start_step=0,
+            num_epochs=1,
+        )
+
+        trainer = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+            checkpoint_dir=tmp_path,
+        )
+
+        trainer.global_step = 10
+        trainer.save_checkpoint(is_best=False)
+
+        checkpoint_path = tmp_path / "checkpoint_step_10.pt"
+        assert checkpoint_path.exists()
+
+        # Load checkpoint and verify averaged_model_state_dict is present
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        assert "averaged_model_state_dict" in checkpoint
+
+    def test_checkpoint_load_with_averaged_model(
+        self,
+        small_model: nn.Module,
+        dummy_dataloader: DataLoader,
+        device: torch.device,
+        tmp_path: Path,
+    ) -> None:
+        """Test that averaged model state is loaded from checkpoint."""
+        config = TrainingConfig(
+            use_swa=True,
+            swa_start_step=0,
+            num_epochs=1,
+        )
+
+        # Create trainer and save checkpoint
+        trainer1 = Trainer(
+            model=small_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+            checkpoint_dir=tmp_path,
+        )
+
+        # Update averaged model with some steps
+        batch = next(iter(dummy_dataloader))
+        for _ in range(5):
+            trainer1.train_step(batch)
+            trainer1.global_step += 1
+            trainer1.averaged_model.update_parameters(trainer1.model)
+
+        trainer1.save_checkpoint(is_best=False)
+        checkpoint_path = tmp_path / f"checkpoint_step_{trainer1.global_step}.pt"
+
+        # Create new trainer and load checkpoint
+        new_model = GPTModel(
+            config=TransformerConfig(
+                vocab_size=100,
+                max_seq_len=32,
+                hidden_dim=64,
+                num_layers=2,
+                num_heads=2,
+                dropout_rate=0.0,
+            )
+        ).to(device)
+
+        trainer2 = Trainer(
+            model=new_model,
+            train_dataloader=dummy_dataloader,
+            val_dataloader=None,
+            config=config,
+            device=device,
+            checkpoint_dir=tmp_path,
+        )
+
+        trainer2.load_checkpoint(checkpoint_path)
+
+        # Verify averaged model states match
+        for p1, p2 in zip(
+            trainer1.averaged_model.parameters(), trainer2.averaged_model.parameters()
+        ):
+            assert torch.allclose(p1, p2, atol=1e-6)

@@ -47,3 +47,8 @@ training:
   use_wandb: true
   wandb_project: zmaj-lm
   wandb_run_name: tiny-stories-8L-6H-384D
+  # Enable SWA/EMA for model weight averaging
+  use_swa: false  # Set to true to enable
+  swa_decay: null  # null for SWA (equal averaging), e.g., 0.9999 for EMA
+  swa_start_step: null  # null defaults to warmup_steps
+  swa_eval: true  # Use averaged model for validation
