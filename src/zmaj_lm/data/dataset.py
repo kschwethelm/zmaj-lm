@@ -1,68 +1,102 @@
-from collections.abc import Iterator
-
 import datasets as ds
 import torch
+from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer
 
 from zmaj_lm.config.dataset_config import DatasetConfig
 from zmaj_lm.utils.masks import create_block_diagonal_mask, create_packing_mask
 
 
-class LMDataset:
-    """Tokenized language model dataset.
+def lm_collate_fn(
+    batch: list[dict[str, torch.Tensor]], use_packing_with_boundaries: bool
+) -> dict[str, torch.Tensor]:
+    """Custom collate function for language model batches.
+
+    Creates input-target pairs by offsetting sequences by 1 token and
+    properly handles both 1D and 2D attention masks.
 
     Args:
-        token_ids: List of tokenized sequences as numpy arrays
+        batch: List of samples from LMDataset, each containing 'tokens' and 'attention_mask'
+        use_packing_with_boundaries: Whether the batch uses block-diagonal attention masks
+
+    Returns:
+        Dictionary with keys:
+            - input_ids: Shape (batch_size, seq_len - 1), dtype long
+            - target_ids: Shape (batch_size, seq_len - 1), dtype long
+            - attention_mask: Shape (batch_size, seq_len - 1) or (batch_size, seq_len - 1, seq_len - 1), dtype bool
+    """
+    # Stack all tokens and masks
+    tokens = torch.stack([sample["tokens"] for sample in batch])  # (batch_size, seq_len)
+    attention_masks = torch.stack(
+        [sample["attention_mask"] for sample in batch]
+    )  # (batch_size, seq_len) or (batch_size, seq_len, seq_len)
+
+    # Create input-target pairs (offset by 1 for autoregressive LM)
+    input_ids = tokens[:, :-1]  # All but last token
+    target_ids = tokens[:, 1:]  # All but first token
+
+    # Slice the pre-computed attention masks to match input sequence length
+    if use_packing_with_boundaries:
+        # Block-diagonal mask: (batch_size, seq_len, seq_len) -> (batch_size, seq_len-1, seq_len-1)
+        attention_mask = attention_masks[:, :-1, :-1]
+    else:
+        # 1D mask: (batch_size, seq_len) -> (batch_size, seq_len-1)
+        attention_mask = attention_masks[:, :-1]
+
+    return {
+        "input_ids": input_ids,
+        "target_ids": target_ids,
+        "attention_mask": attention_mask,
+    }
+
+
+class LMDataset(Dataset):
+    """PyTorch Dataset for tokenized language model training.
+
+    Supports both sequence packing (for efficiency) and padding (for simplicity).
+    When packing is enabled, can optionally create block-diagonal attention masks
+    to prevent cross-document attention.
+
+    Args:
+        token_ids: List of tokenized sequences as tensors
         seq_len: Fixed sequence length for chunking
-        batch_size: Number of sequences per batch
         use_packing: If True, concatenate and pack sequences. If False, pad individually.
         padding_token: Token ID to use for padding (required if use_packing=False)
         prevent_cross_doc_attention: If True with packing, create masks to prevent cross-document attention
-        shuffle: Whether to shuffle documents before packing and chunks between epochs
-        seed: Random seed for shuffling
+        shuffle_docs: Whether to shuffle documents before packing/chunking
+        seed: Random seed for document shuffling
     """
 
     def __init__(
         self,
         token_ids: list[torch.Tensor],
         seq_len: int,
-        batch_size: int,
         use_packing: bool = True,
         padding_token: int = 0,
         prevent_cross_doc_attention: bool = False,
-        shuffle: bool = True,
+        shuffle_docs: bool = True,
         seed: int = 42,
     ):
         self.seq_len = seq_len
-        self.batch_size = batch_size
         self.use_packing = use_packing
         self.padding_token = padding_token
         self.prevent_cross_doc_attention = prevent_cross_doc_attention
-        self.shuffle = shuffle
-        self.generator = torch.Generator()
-        self.generator.manual_seed(seed)
 
         # Shuffle documents before packing/padding to avoid ordering biases
         # This ensures documents from similar topics/sources aren't packed together
-        if shuffle:
-            doc_indices = torch.randperm(len(token_ids), generator=self.generator)
-            token_ids = [token_ids[int(i)] for i in doc_indices]
+        if shuffle_docs:
+            generator = torch.Generator().manual_seed(seed)
+            doc_indices = torch.randperm(len(token_ids), generator=generator).tolist()
+            token_ids = [token_ids[i] for i in doc_indices]
 
         # Preprocess: chunk sequences and create masks
-        self.doc_ids: torch.Tensor | None
         if use_packing:
             if prevent_cross_doc_attention:
-                self.chunks, self.doc_ids, self.attention_masks = (
-                    self._pack_sequences_with_boundaries(token_ids)
-                )
+                self.chunks, self.attention_masks = self._pack_sequences_with_boundaries(token_ids)
             else:
                 self.chunks, self.attention_masks = self._pack_sequences(token_ids)
-                self.doc_ids = None
         else:
             self.chunks, self.attention_masks = self._pad_sequences(token_ids, padding_token)
-            self.doc_ids = None
-
-        self.num_batches = len(self.chunks) // batch_size
 
     def _pack_sequences(self, token_ids: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Concatenate all sequences and chunk into fixed lengths.
@@ -88,14 +122,12 @@ class LMDataset:
 
     def _pack_sequences_with_boundaries(
         self, token_ids: list[torch.Tensor]
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Concatenate sequences and track document boundaries for block-diagonal attention.
 
         Returns:
-            Tuple of (chunks, doc_ids, attention_masks) where:
+            Tuple of (chunks, attention_masks) where:
             - chunks: Token ID arrays of shape (num_chunks, seq_len)
-            - doc_ids: Document ID arrays of shape (num_chunks, seq_len) indicating which
-                       document each token belongs to within the chunk
             - attention_masks: Block-diagonal masks of shape (num_chunks, seq_len, seq_len), dtype bool
         """
         # Concatenate all sequences
@@ -117,7 +149,7 @@ class LMDataset:
         # Create block-diagonal attention masks using utility function
         attention_masks = create_block_diagonal_mask(doc_id_chunks, dtype=torch.bool)
 
-        return chunks, doc_id_chunks, attention_masks
+        return chunks, attention_masks
 
     def _pad_sequences(
         self, token_ids: list[torch.Tensor], padding_token: int
@@ -146,51 +178,28 @@ class LMDataset:
 
         return padded_sequences, attention_masks
 
-    def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
-        """Iterate over batches, yielding input-target pairs.
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        """Get a single sequence and its attention mask.
 
-        Yields:
+        Args:
+            idx: Index of the chunk to retrieve
+
+        Returns:
             Dictionary with keys:
-                - input_ids: Shape (batch_size, seq_len - 1), dtype int
-                - target_ids: Shape (batch_size, seq_len - 1), dtype int
-                - attention_mask: Shape (batch_size, seq_len - 1) or (batch_size, seq_len - 1, seq_len - 1), dtype bool
-                    - 1D: Simple padding/packing mask (True for real tokens, False for padding)
-                    - 2D: Block-diagonal mask for document boundaries (when prevent_cross_doc_attention=True)
+                - tokens: Shape (seq_len,), dtype long
+                - attention_mask: Shape (seq_len,) or (seq_len, seq_len), dtype bool
         """
-        indices = torch.arange(len(self.chunks))
-        if self.shuffle:
-            # Use PyTorch random for shuffling with generator for each epoch
-            indices = torch.randperm(len(self.chunks), generator=self.generator)
-
-        for i in range(0, len(indices) - self.batch_size + 1, self.batch_size):
-            batch_indices = indices[i : i + self.batch_size]
-            batch = self.chunks[batch_indices]  # Shape: (batch_size, seq_len)
-            mask_batch = self.attention_masks[batch_indices]  # Pre-computed masks
-
-            # Create input-target pairs (offset by 1 for autoregressive LM)
-            input_ids = batch[:, :-1]  # All but last token
-            target_ids = batch[:, 1:]  # All but first token
-
-            # Slice the pre-computed attention masks to match input sequence length
-            if self.use_packing and self.prevent_cross_doc_attention:
-                # Block-diagonal mask: (batch_size, seq_len, seq_len) -> (batch_size, seq_len-1, seq_len-1)
-                attention_mask = mask_batch[:, :-1, :-1]
-            else:
-                # 1D mask: (batch_size, seq_len) -> (batch_size, seq_len-1)
-                attention_mask = mask_batch[:, :-1]
-
-            yield {
-                "input_ids": input_ids,
-                "target_ids": target_ids,
-                "attention_mask": attention_mask,
-            }
+        return {
+            "tokens": self.chunks[idx],
+            "attention_mask": self.attention_masks[idx],
+        }
 
     def __len__(self) -> int:
-        """Return the number of batches per epoch."""
-        return self.num_batches
+        """Return the number of chunks (samples) in the dataset."""
+        return len(self.chunks)
 
 
-def create_dataloaders(config: DatasetConfig) -> tuple[LMDataset, LMDataset]:
+def create_dataloaders(config: DatasetConfig) -> tuple[DataLoader, DataLoader]:
     """Create train and validation dataloaders.
 
     Args:
@@ -259,26 +268,50 @@ def create_dataloaders(config: DatasetConfig) -> tuple[LMDataset, LMDataset]:
         torch.tensor(example["input_ids"], dtype=torch.long) for example in val_dataset
     ]
 
-    # Create dataloaders
-    train_dataloader = LMDataset(
+    # Create datasets
+    train_lm_dataset = LMDataset(
         train_token_ids,
         config.seq_len,
-        config.batch_size,
         use_packing=config.use_packing,
         padding_token=padding_token,
         prevent_cross_doc_attention=config.prevent_cross_doc_attention,
-        shuffle=config.shuffle,
+        shuffle_docs=config.shuffle,
         seed=config.seed,
     )
-    val_dataloader = LMDataset(
+    val_lm_dataset = LMDataset(
         val_token_ids,
         config.seq_len,
-        config.batch_size,
         use_packing=config.use_packing,  # Use same packing strategy for consistency
         padding_token=padding_token,
         prevent_cross_doc_attention=config.prevent_cross_doc_attention,
-        shuffle=False,  # Never shuffle validation
+        shuffle_docs=False,  # Never shuffle validation documents
         seed=config.seed,
+    )
+
+    # Create collate function with proper configuration
+    use_packing_with_boundaries = config.use_packing and config.prevent_cross_doc_attention
+
+    def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        return lm_collate_fn(batch, use_packing_with_boundaries)
+
+    # Create DataLoaders
+    train_dataloader = DataLoader(
+        train_lm_dataset,
+        batch_size=config.batch_size,
+        shuffle=config.shuffle,
+        num_workers=config.num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,  # Faster transfer to GPU
+        persistent_workers=config.num_workers > 0,  # Keep workers alive between epochs
+    )
+    val_dataloader = DataLoader(
+        val_lm_dataset,
+        batch_size=config.batch_size,
+        shuffle=False,  # Never shuffle validation
+        num_workers=config.num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
+        persistent_workers=config.num_workers > 0,
     )
 
     return train_dataloader, val_dataloader

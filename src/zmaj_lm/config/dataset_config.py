@@ -31,3 +31,4 @@ class DatasetConfig(BaseModel):
     # Performance options
     cache_dir: str | None = None  # Optional directory for caching datasets
     num_proc: int = 8  # Number of processes for parallel tokenization
+    num_workers: int = 4  # Number of DataLoader workers for parallel data loading
