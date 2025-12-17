@@ -26,3 +26,8 @@ class TrainingConfig(BaseModel):
     # LR scheduler
     scheduler_type: str = "cosine"  # e.g., "linear", "cosine"
     min_learning_rate: float = 1e-5
+
+    # Weights & Biases logging
+    use_wandb: bool = False
+    wandb_project: str | None = None
+    wandb_run_name: str | None = None
