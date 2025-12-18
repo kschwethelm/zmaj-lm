@@ -23,6 +23,9 @@ coverage.xml
 # Ruff
 .ruff_cache/
 
+# W&B
+wandb/
+
 # Images
 *.png
 *.jpg

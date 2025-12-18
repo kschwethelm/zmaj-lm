@@ -51,7 +51,7 @@ class GPTModel(nn.Module):
         seq_len = input_ids.shape[1]
         mask = create_decoder_mask(
             seq_len, device=input_ids.device, attention_mask=attention_mask
-        )  # (1, seq_len, seq_len)
+        )  # (batch, seq_len, seq_len) or (1, seq_len, seq_len)
 
         x = self.embedding.encode(input_ids)  # (batch, seq_len, hidden_dim)
 

@@ -86,7 +86,7 @@ class MultiHeadAttention(nn.Module):
 
         Args:
             x: Input tensor of shape (batch, seq_len, hidden_dim)
-            mask: Optional attention mask, broadcastable to (batch, n_heads, seq_len, seq_len)
+            mask: Optional attention mask of shape (batch, seq_len, seq_len) or (1, seq_len, seq_len)
 
         Returns:
             If return_attention_weights is False:
@@ -105,6 +105,10 @@ class MultiHeadAttention(nn.Module):
         key = split_heads_transposed(key, self.config.num_heads)
         value = split_heads_transposed(value, self.config.num_heads)
         # Shape after split: (batch, n_heads, seq_len, head_dim)
+
+        # Add heads dimension to mask if needed: (batch, seq_len, seq_len) -> (batch, 1, seq_len, seq_len)
+        if mask is not None and mask.ndim == 3:
+            mask = mask.unsqueeze(1)
 
         # Compute attention
         attn_output, attention_weights = scaled_dot_product_attention(
