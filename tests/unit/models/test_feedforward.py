@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from zmaj_lm.config.model_config import TransformerConfig
@@ -146,3 +147,83 @@ class TestFeedForward:
             output_regular = ffn(x)
 
         assert torch.allclose(output_compiled, output_regular, rtol=1e-5, atol=1e-5)
+
+    @pytest.mark.parametrize("activation", ["gelu", "gelu_tanh", "silu", "relu"])
+    def test_activation_functions(self, activation: str, device: torch.device) -> None:
+        """Test that different activation functions work correctly."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=64,
+            num_layers=2,
+            num_heads=4,
+            mlp_dim=256,
+            dropout_rate=0.0,
+            activation=activation,
+        )
+
+        ffn = FeedForward(config=config).to(device)
+        ffn.eval()
+
+        batch, seq_len = 2, 8
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output = ffn(x)
+
+        assert output.shape == (batch, seq_len, config.hidden_dim)
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isinf(output))
+
+        # Verify activation is applied (nonlinearity check)
+        with torch.no_grad():
+            x_scaled = 2.0 * x
+            output_scaled_input = ffn(x_scaled)
+            output_scaled = 2.0 * output
+
+        # All activations should be nonlinear
+        assert not torch.allclose(output_scaled_input, output_scaled, rtol=0.01)
+
+    def test_gelu_variants_difference(self, device: torch.device) -> None:
+        """Test that GELU and GELU tanh produce different outputs."""
+        config_gelu = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=64,
+            num_layers=2,
+            num_heads=4,
+            mlp_dim=256,
+            dropout_rate=0.0,
+            activation="gelu",
+        )
+
+        config_gelu_tanh = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=64,
+            num_layers=2,
+            num_heads=4,
+            mlp_dim=256,
+            dropout_rate=0.0,
+            activation="gelu_tanh",
+        )
+
+        ffn_gelu = FeedForward(config=config_gelu).to(device)
+        ffn_gelu_tanh = FeedForward(config=config_gelu_tanh).to(device)
+
+        # Copy weights to ensure difference is only from activation
+        ffn_gelu_tanh.load_state_dict(ffn_gelu.state_dict(), strict=False)
+
+        ffn_gelu.eval()
+        ffn_gelu_tanh.eval()
+
+        batch, seq_len = 2, 8
+        x = torch.randn(batch, seq_len, config_gelu.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output_gelu = ffn_gelu(x)
+            output_gelu_tanh = ffn_gelu_tanh(x)
+
+        # Outputs should be different but close (both are GELU approximations)
+        assert not torch.allclose(output_gelu, output_gelu_tanh, rtol=1e-6, atol=1e-8)
+        assert torch.allclose(output_gelu, output_gelu_tanh, rtol=5e-2, atol=1e-2)

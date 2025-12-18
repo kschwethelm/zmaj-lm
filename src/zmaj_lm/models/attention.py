@@ -3,52 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from zmaj_lm.config.model_config import TransformerConfig
-from zmaj_lm.utils.masks import mask_to_bias
 from zmaj_lm.utils.shapes import merge_heads_transposed, split_heads_transposed
-
-
-def scaled_dot_product_attention(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    mask: torch.Tensor | None = None,
-    dropout_rate: float = 0.0,
-    training: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute scaled dot-product attention.
-
-    Formula: Attention(Q, K, V) = softmax((QK^T / √d_k) + M) V
-
-    Args:
-        query: torch.Tensor of shape (batch, n_heads, seq_len_q, d_head)
-        key: torch.Tensor of shape (batch, n_heads, seq_len_k, d_head)
-        value: torch.Tensor of shape (batch, n_heads, seq_len_v, d_head)
-        mask: torch.Tensor broadcastable to (batch, 1, seq_len_q, seq_len_k), default is None
-        dropout_rate: float, dropout rate to apply on attention weights
-        training: bool, whether the model is in training mode
-
-    Returns:
-        output: Attention output of shape (batch, n_heads, seq_len_q, d_head)
-        attention_weights: Attention probabilities (batch, n_heads, seq_len_q, seq_len_k)
-    """
-    d_head = query.shape[-1]
-    # torch.einsum('bhqd,bhkd->bhqk', q, k) for the matrix multiplication Q @ K^T
-    scores = torch.einsum("bhqd,bhkd->bhqk", query, key) / torch.sqrt(
-        torch.tensor(d_head, dtype=query.dtype, device=query.device)
-    )
-
-    if mask is not None:
-        bias = mask_to_bias(mask, dtype=scores.dtype)
-        scores = scores + bias
-
-    attention_weights = F.softmax(scores, dim=-1)  # normalize over keys
-
-    if training and dropout_rate > 0.0:
-        attention_weights = F.dropout(attention_weights, p=dropout_rate, training=True)
-
-    output = torch.einsum("bhqk,bhkd->bhqd", attention_weights, value)
-
-    return output, attention_weights
 
 
 class MultiHeadAttention(nn.Module):
@@ -111,13 +66,12 @@ class MultiHeadAttention(nn.Module):
             mask = mask.unsqueeze(1)
 
         # Compute attention
-        attn_output, attention_weights = scaled_dot_product_attention(
+        attn_output = F.scaled_dot_product_attention(
             query=query,
             key=key,
             value=value,
-            mask=mask,
-            dropout_rate=self.config.attention_dropout_rate,
-            training=self.training,
+            attn_mask=mask,
+            dropout_p=(self.config.attention_dropout_rate if self.training else 0.0),
         )
 
         # Merge attention heads
@@ -126,6 +80,4 @@ class MultiHeadAttention(nn.Module):
         # Final output projection
         output = self.out_proj(attn_output)
 
-        if self.return_attention_weights:
-            return output, attention_weights
         return output

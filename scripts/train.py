@@ -95,6 +95,11 @@ def main() -> None:
     num_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Model initialized with {num_params:,} parameters")
 
+    # Compile model for performance optimization
+    logger.info("Compiling model with torch.compile...")
+    model = torch.compile(model)
+    logger.info("Model compilation complete")
+
     # Create dataloaders
     logger.info("Creating dataloaders...")
     train_dataloader, val_dataloader = create_dataloaders(dataset_config)
