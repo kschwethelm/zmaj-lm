@@ -32,6 +32,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.14.9",
+    "types-pyyaml>=6.0.12.20250915",
     "wandb>=0.23.1",
 ]
 
@@ -114,3 +115,7 @@ warn_unused_ignores = true
 warn_no_return = true
 strict_equality = true
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "wandb"
+ignore_errors = true

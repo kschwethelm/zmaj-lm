@@ -55,7 +55,12 @@ class Trainer:
         self.val_dataloader = val_dataloader
         self.config = config
         self.device = device
-        self.checkpoint_dir = checkpoint_dir
+
+        # Set up checkpoint directory with run_name subdirectory if provided
+        if checkpoint_dir is not None and config.run_name is not None:
+            self.checkpoint_dir = checkpoint_dir / config.run_name
+        else:
+            self.checkpoint_dir = checkpoint_dir
 
         # Set random seed for reproducibility
         torch.manual_seed(config.seed)
@@ -70,7 +75,7 @@ class Trainer:
             else:
                 wandb.init(
                     project=config.wandb_project,
-                    name=config.wandb_run_name,
+                    name=config.run_name,
                     config=config.model_dump(),
                 )
                 wandb.watch(model, log="all", log_freq=config.log_every_n_steps)
@@ -140,7 +145,7 @@ class Trainer:
         logger.info(f"Training on device: {device}")
         if self.use_wandb:
             logger.info(
-                f"W&B logging enabled: project={config.wandb_project}, run={config.wandb_run_name}"
+                f"W&B logging enabled: project={config.wandb_project}, run={config.run_name}"
             )
 
     def _create_scheduler(self) -> LRScheduler:

@@ -14,6 +14,8 @@ class SinusoidalPositionalEncoding(nn.Module):
     in a sequence without using learned parameters.
     """
 
+    encodings: torch.Tensor
+
     def __init__(self, config: TransformerConfig) -> None:
         """Initialize sinusoidal positional encodings.
 

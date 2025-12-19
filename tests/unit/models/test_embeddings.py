@@ -261,7 +261,7 @@ class TestTokenEmbedding:
         compiled_embedding = torch.compile(embedding)
 
         with torch.no_grad():
-            output_compiled = compiled_embedding.encode(input_ids)
+            output_compiled = compiled_embedding.encode(input_ids)  # type: ignore[attr-defined]
             output_regular = embedding.encode(input_ids)
 
         assert torch.allclose(output_compiled, output_regular, rtol=1e-5, atol=1e-5)

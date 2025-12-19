@@ -1,6 +1,7 @@
 # Local files
 .env
 /outputs
+/checkpoints
 /data
 
 # Python

@@ -227,3 +227,161 @@ class TestFeedForward:
         # Outputs should be different but close (both are GELU approximations)
         assert not torch.allclose(output_gelu, output_gelu_tanh, rtol=1e-6, atol=1e-8)
         assert torch.allclose(output_gelu, output_gelu_tanh, rtol=5e-2, atol=1e-2)
+
+    def test_gated_activation_output_shape(self, device: torch.device) -> None:
+        """Test that gated FFN preserves input shape."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=256,
+            num_layers=4,
+            num_heads=8,
+            mlp_dim=1024,
+            activation="swiglu",
+        )
+
+        batch, seq_len = 2, 16
+
+        ffn = FeedForward(config=config).to(device)
+        ffn.eval()
+
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output = ffn(x)
+
+        assert output.shape == (batch, seq_len, config.hidden_dim)
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isinf(output))
+
+    def test_gated_activation_parameter_count(self, device: torch.device) -> None:
+        """Test that gated FFN parameter count with chunking."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=256,
+            num_layers=4,
+            num_heads=8,
+            mlp_dim=1024,
+            use_bias=True,
+            activation="swiglu",
+        )
+
+        ffn = FeedForward(config=config).to(device)
+
+        # With gated activation (chunk-based):
+        # dense_1: (hidden_dim -> 2*mlp_dim) + 2*mlp_dim bias
+        # dense_2: (mlp_dim -> hidden_dim) + hidden_dim bias (input is chunked to mlp_dim)
+        expected_total = (
+            config.hidden_dim * (2 * config.mlp_dim)
+            + (2 * config.mlp_dim)
+            + config.mlp_dim * config.hidden_dim
+            + config.hidden_dim
+        )
+
+        total_params = sum(p.numel() for p in ffn.parameters())
+        assert total_params == expected_total
+
+    def test_gated_vs_non_gated_outputs_differ(self, device: torch.device) -> None:
+        """Test that gated and non-gated FFN produce different outputs."""
+        config_standard = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=128,
+            num_layers=2,
+            num_heads=4,
+            mlp_dim=512,
+            dropout_rate=0.0,
+            activation="gelu",
+        )
+
+        config_gated = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=128,
+            num_layers=2,
+            num_heads=4,
+            mlp_dim=512,
+            dropout_rate=0.0,
+            activation="geglu",
+        )
+
+        ffn_standard = FeedForward(config=config_standard).to(device)
+        ffn_gated = FeedForward(config=config_gated).to(device)
+
+        ffn_standard.eval()
+        ffn_gated.eval()
+
+        batch, seq_len = 2, 8
+        x = torch.randn(batch, seq_len, config_standard.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output_standard = ffn_standard(x)
+            output_gated = ffn_gated(x)
+
+        # Outputs should differ significantly due to gating mechanism
+        assert not torch.allclose(output_standard, output_gated, rtol=1e-3, atol=1e-5)
+
+    @pytest.mark.parametrize("activation", ["geglu", "swiglu"])
+    def test_gated_activation_variants(self, activation: str, device: torch.device) -> None:
+        """Test that gated activation works with different activation functions (GeGLU, SwiGLU)."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=64,
+            num_layers=2,
+            num_heads=4,
+            mlp_dim=256,
+            dropout_rate=0.0,
+            activation=activation,
+        )
+
+        ffn = FeedForward(config=config).to(device)
+        ffn.eval()
+
+        batch, seq_len = 2, 8
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output = ffn(x)
+
+        assert output.shape == (batch, seq_len, config.hidden_dim)
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isinf(output))
+
+        # Verify gating is applied (nonlinearity check)
+        with torch.no_grad():
+            x_scaled = 2.0 * x
+            output_scaled_input = ffn(x_scaled)
+            output_scaled = 2.0 * output
+
+        # Gated activations should be nonlinear
+        assert not torch.allclose(output_scaled_input, output_scaled, rtol=0.01)
+
+    def test_swiglu_compilation(self, device: torch.device) -> None:
+        """Test that SwiGLU can be compiled."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            hidden_dim=128,
+            num_layers=2,
+            num_heads=4,
+            mlp_dim=512,
+            activation="swiglu",
+        )
+
+        batch, seq_len = 2, 8
+
+        ffn = FeedForward(config=config).to(device)
+        ffn.eval()
+
+        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+
+        # Compile the module
+        compiled_ffn = torch.compile(ffn)
+
+        with torch.no_grad():
+            output_compiled = compiled_ffn(x)
+            output_regular = ffn(x)
+
+        assert torch.allclose(output_compiled, output_regular, rtol=1e-5, atol=1e-5)

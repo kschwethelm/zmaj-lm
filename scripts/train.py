@@ -6,7 +6,7 @@ dataloaders, and runs the training loop with optional W&B logging.
 
 Example usage:
     python scripts/train.py --config configs/tiny_stories.yaml
-    python scripts/train.py --config configs/tiny_stories.yaml --checkpoint-dir checkpoints/run1
+    python scripts/train.py --config configs/tiny_stories.yaml --resume-from checkpoints/run1/checkpoint_epoch_10.pt
 """
 
 import argparse
@@ -47,12 +47,6 @@ def main() -> None:
         type=Path,
         required=True,
         help="Path to YAML configuration file",
-    )
-    parser.add_argument(
-        "--checkpoint-dir",
-        type=Path,
-        default=None,
-        help="Directory to save checkpoints (optional)",
     )
     parser.add_argument(
         "--resume-from",
@@ -105,6 +99,10 @@ def main() -> None:
     train_dataloader, val_dataloader = create_dataloaders(dataset_config)
     logger.info(f"Train batches: {len(train_dataloader)}, Val batches: {len(val_dataloader)}")
 
+    # Use checkpoint directory from config; resume path can be overridden by CLI
+    checkpoint_dir = training_config.checkpoint_dir
+    resume_from = args.resume_from if args.resume_from is not None else training_config.resume_from
+
     # Initialize trainer
     logger.info("Initializing trainer...")
     trainer = Trainer(
@@ -113,13 +111,13 @@ def main() -> None:
         val_dataloader=val_dataloader,
         config=training_config,
         device=device,
-        checkpoint_dir=args.checkpoint_dir,
+        checkpoint_dir=checkpoint_dir,
     )
 
     # Resume from checkpoint if specified
-    if args.resume_from is not None:
-        logger.info(f"Resuming from checkpoint: {args.resume_from}")
-        trainer.load_checkpoint(args.resume_from)
+    if resume_from is not None:
+        logger.info(f"Resuming from checkpoint: {resume_from}")
+        trainer.load_checkpoint(resume_from)
 
     # Start training
     logger.info("Starting training...")

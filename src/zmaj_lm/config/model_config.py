@@ -25,7 +25,7 @@ class TransformerConfig(BaseModel):
     residual_dropout_rate: float | None = None  # if None, use dropout_rate
 
     pos_encoding_type: Literal["learned", "sinusoidal"] = "learned"  # TODO: RoPE, NoPE, RNoPE
-    activation: Literal["gelu", "gelu_tanh", "silu", "relu"] = "gelu"
+    activation: Literal["gelu", "gelu_tanh", "silu", "relu", "geglu", "swiglu"] = "gelu"
 
     @model_validator(mode="after")
     def validate_num_heads(self) -> "TransformerConfig":

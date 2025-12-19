@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import BaseModel
 
 
@@ -6,6 +8,7 @@ class TrainingConfig(BaseModel):
 
     # Reproducibility
     seed: int = 72
+    run_name: str | None = None  # Experiment identifier for checkpoints and logging
 
     # Optimizer
     learning_rate: float = 3e-4
@@ -21,6 +24,8 @@ class TrainingConfig(BaseModel):
     warmup_steps: int = 100  # LR warmup steps
     eval_every_n_steps: int = 500
     checkpoint_every_n_steps: int = 1000
+    checkpoint_dir: Path | None = None  # Directory to save checkpoints
+    resume_from: Path | None = None  # Path to checkpoint to resume from
     log_every_n_steps: int = 100
 
     # LR scheduler
@@ -30,7 +35,6 @@ class TrainingConfig(BaseModel):
     # Weights & Biases logging
     use_wandb: bool = False
     wandb_project: str | None = None
-    wandb_run_name: str | None = None
 
     # Stochastic Weight Averaging / Exponential Moving Average
     use_swa: bool = False  # Enable SWA/EMA
