@@ -24,7 +24,13 @@ class TransformerConfig(BaseModel):
     attention_dropout_rate: float | None = None  # if None, use dropout_rate
     residual_dropout_rate: float | None = None  # if None, use dropout_rate
 
-    pos_encoding_type: Literal["learned", "sinusoidal"] = "learned"  # TODO: RoPE, NoPE, RNoPE
+    pos_encoding_type: (
+        Literal["learned", "sinusoidal", "rope", "none"]
+        | list[Literal["learned", "sinusoidal", "rope", "none"]]
+    ) = "learned"
+    rope_theta: float = (
+        10000.0  # RoPE base frequency (10000 standard, larger values for long context)
+    )
     activation: Literal["gelu", "gelu_tanh", "silu", "relu", "geglu", "swiglu"] = "gelu"
 
     @model_validator(mode="after")
@@ -55,6 +61,19 @@ class TransformerConfig(BaseModel):
         # Use dropout_rate if residual_dropout_rate is not specified
         if self.residual_dropout_rate is None:
             object.__setattr__(self, "residual_dropout_rate", self.dropout_rate)
+        return self
+
+    @model_validator(mode="after")
+    def validate_pos_encoding_type_length(self) -> "TransformerConfig":
+        # If pos_encoding_type is a list, ensure it matches num_layers
+        if (
+            isinstance(self.pos_encoding_type, list)
+            and len(self.pos_encoding_type) != self.num_layers
+        ):
+            raise ValueError(
+                f"pos_encoding_type list length ({len(self.pos_encoding_type)}) "
+                f"must match num_layers ({self.num_layers})"
+            )
         return self
 
     @computed_field  # type: ignore[prop-decorator]

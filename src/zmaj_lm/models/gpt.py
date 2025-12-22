@@ -3,6 +3,7 @@ import torch.nn as nn
 
 from zmaj_lm.config.model_config import TransformerConfig
 from zmaj_lm.models.embeddings import TokenEmbedding
+from zmaj_lm.models.positional_encoding import RotaryPositionalEncoding
 from zmaj_lm.models.transformer_block import TransformerBlock
 from zmaj_lm.utils.masks import create_decoder_mask
 
@@ -11,7 +12,7 @@ class GPTModel(nn.Module):
     """GPT-style Transformer Language Model.
 
     Consists of:
-    - Token embedding layer with learned positional encodings
+    - Token embedding layer with positional encodings (learned, sinusoidal, or RoPE)
     - Stack of Transformer blocks with pre-norm architecture
     - Final layer normalization
     - Output projection tied to input embeddings
@@ -28,9 +29,28 @@ class GPTModel(nn.Module):
         super().__init__()
         self.config = config
         self.embedding = TokenEmbedding(config=config)
-        self.transformer_blocks = nn.ModuleList(
-            [TransformerBlock(config=config) for _ in range(config.num_layers)]
-        )
+
+        # Create positional encoding instances for each layer
+        # If pos_encoding_type is a string, use the same encoding for all layers
+        # If it's a list, use different encodings per layer
+        if isinstance(config.pos_encoding_type, str):
+            # Single encoding type for all layers
+            rope = (
+                RotaryPositionalEncoding(config=config)
+                if config.pos_encoding_type == "rope"
+                else None
+            )
+            self.transformer_blocks = nn.ModuleList(
+                [TransformerBlock(config=config, rope=rope) for _ in range(config.num_layers)]
+            )
+        else:
+            # Per-layer encoding types
+            self.transformer_blocks = nn.ModuleList()
+            for layer_idx in range(config.num_layers):
+                pos_enc_type = config.pos_encoding_type[layer_idx]
+                rope = RotaryPositionalEncoding(config=config) if pos_enc_type == "rope" else None
+                self.transformer_blocks.append(TransformerBlock(config=config, rope=rope))
+
         self.final_layernorm = nn.LayerNorm(config.hidden_dim, eps=config.layer_norm_eps)
 
     def forward(

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from zmaj_lm.config.model_config import TransformerConfig
+from zmaj_lm.models.positional_encoding import RotaryPositionalEncoding
 from zmaj_lm.utils.shapes import merge_heads_transposed, split_heads_transposed
 
 
@@ -11,13 +12,20 @@ class MultiHeadAttention(nn.Module):
 
     Applies learned linear projections to create queries, keys, and values,
     then computes scaled dot-product attention across multiple heads in parallel.
+    Optionally applies RoPE (Rotary Positional Encoding) to queries and keys.
     """
 
-    def __init__(self, config: TransformerConfig, return_attention_weights: bool = False) -> None:
+    def __init__(
+        self,
+        config: TransformerConfig,
+        rope: RotaryPositionalEncoding | None = None,
+        return_attention_weights: bool = False,
+    ) -> None:
         """Initialize the multi-head attention layer.
 
         Args:
             config: Transformer configuration
+            rope: Optional RotaryPositionalEncoding instance for RoPE
             return_attention_weights: Whether to return attention weights
 
         Note: For efficiency, Q/K/V projections could be fused into a single
@@ -25,6 +33,7 @@ class MultiHeadAttention(nn.Module):
         """
         super().__init__()
         self.config = config
+        self.rope = rope
         self.return_attention_weights = return_attention_weights
 
         self.q_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
@@ -60,6 +69,10 @@ class MultiHeadAttention(nn.Module):
         key = split_heads_transposed(key, self.config.num_heads)
         value = split_heads_transposed(value, self.config.num_heads)
         # Shape after split: (batch, n_heads, seq_len, head_dim)
+
+        # Apply RoPE if using rotary positional encoding
+        if self.rope is not None:
+            query, key = self.rope.apply_rotary_pos_emb(query, key)
 
         # Add heads dimension to mask if needed: (batch, seq_len, seq_len) -> (batch, 1, seq_len, seq_len)
         if mask is not None and mask.ndim == 3:

@@ -4,6 +4,7 @@ import torch.nn as nn
 from zmaj_lm.config.model_config import TransformerConfig
 from zmaj_lm.models.attention import MultiHeadAttention
 from zmaj_lm.models.feedforward import FeedForward
+from zmaj_lm.models.positional_encoding import RotaryPositionalEncoding
 
 
 class TransformerBlock(nn.Module):
@@ -14,17 +15,21 @@ class TransformerBlock(nn.Module):
     - Multi-head self-attention with residual connection
     - Feed-forward network with residual connection
     - Optional residual dropout for regularization
+    - Optional RoPE (Rotary Positional Encoding) support
     """
 
-    def __init__(self, config: TransformerConfig) -> None:
+    def __init__(
+        self, config: TransformerConfig, rope: RotaryPositionalEncoding | None = None
+    ) -> None:
         """Initialize the transformer block components.
 
         Args:
             config: Transformer configuration
+            rope: Optional RotaryPositionalEncoding instance for RoPE
         """
         super().__init__()
         self.config = config
-        self.attention = MultiHeadAttention(config=config)
+        self.attention = MultiHeadAttention(config=config, rope=rope)
         self.feedforward = FeedForward(config=config)
         self.layernorm_1 = nn.LayerNorm(config.hidden_dim, eps=config.layer_norm_eps)
         self.layernorm_2 = nn.LayerNorm(config.hidden_dim, eps=config.layer_norm_eps)
