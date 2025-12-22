@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from zmaj_lm.config.model_config import TransformerConfig
+from zmaj_lm.config.model_config import TransformerBlockConfig
 from zmaj_lm.models.feedforward import FeedForward
 
 
@@ -10,50 +10,44 @@ class TestFeedForward:
 
     def test_output_shape(self, device: torch.device) -> None:
         """Test that FFN preserves input shape (batch, seq_len, hidden_dim)."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=256,
-            num_layers=4,
             num_heads=8,
             mlp_dim=1024,
         )
 
         batch, seq_len = 2, 16
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
         ffn.eval()
 
-        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
 
         with torch.no_grad():
             output = ffn(x)
 
-        assert output.shape == (batch, seq_len, config.hidden_dim)
+        assert output.shape == (batch, seq_len, block_config.hidden_dim)
         assert not torch.any(torch.isnan(output))
         assert not torch.any(torch.isinf(output))
 
     def test_parameter_count(self, device: torch.device) -> None:
         """Test that parameter count matches expected for FFN."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=256,
-            num_layers=4,
             num_heads=8,
             mlp_dim=1024,
             use_bias=True,
         )
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
 
         # First layer: (hidden_dim -> mlp_dim) + mlp_dim bias
         # Second layer: (mlp_dim -> hidden_dim) + hidden_dim bias
         expected_total = (
-            config.hidden_dim * config.mlp_dim
-            + config.mlp_dim
-            + config.mlp_dim * config.hidden_dim
-            + config.hidden_dim
+            block_config.hidden_dim * block_config.mlp_dim
+            + block_config.mlp_dim
+            + block_config.mlp_dim * block_config.hidden_dim
+            + block_config.hidden_dim
         )
 
         total_params = sum(p.numel() for p in ffn.parameters())
@@ -61,11 +55,8 @@ class TestFeedForward:
 
     def test_deterministic_vs_training(self, device: torch.device) -> None:
         """Test that eval mode produces consistent outputs and training mode applies dropout."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=128,
-            num_layers=2,
             num_heads=4,
             mlp_dim=512,
             dropout_rate=0.1,
@@ -73,8 +64,8 @@ class TestFeedForward:
 
         batch, seq_len = 2, 8
 
-        ffn = FeedForward(config=config).to(device)
-        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        ffn = FeedForward(config=block_config).to(device)
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
 
         # Eval mode should give same output every time
         ffn.eval()
@@ -93,21 +84,18 @@ class TestFeedForward:
 
     def test_activation_nonlinearity(self, device: torch.device) -> None:
         """Test that FFN applies nonlinear activation (GELU)."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=64,
-            num_layers=2,
             num_heads=4,
             mlp_dim=256,
             dropout_rate=0.0,
         )
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
         ffn.eval()
 
         # Use a simple input pattern
-        x = torch.ones((1, 4, config.hidden_dim), device=device)
+        x = torch.ones((1, 4, block_config.hidden_dim), device=device)
 
         with torch.no_grad():
             output = ffn(x)
@@ -123,21 +111,18 @@ class TestFeedForward:
 
     def test_compilation(self, device: torch.device) -> None:
         """Test that FFN can be compiled."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=128,
-            num_layers=2,
             num_heads=4,
             mlp_dim=512,
         )
 
         batch, seq_len = 2, 8
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
         ffn.eval()
 
-        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
 
         # Compile the module
         compiled_ffn = torch.compile(ffn)
@@ -151,27 +136,24 @@ class TestFeedForward:
     @pytest.mark.parametrize("activation", ["gelu", "gelu_tanh", "silu", "relu"])
     def test_activation_functions(self, activation: str, device: torch.device) -> None:
         """Test that different activation functions work correctly."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=64,
-            num_layers=2,
             num_heads=4,
             mlp_dim=256,
             dropout_rate=0.0,
             activation=activation,
         )
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
         ffn.eval()
 
         batch, seq_len = 2, 8
-        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
 
         with torch.no_grad():
             output = ffn(x)
 
-        assert output.shape == (batch, seq_len, config.hidden_dim)
+        assert output.shape == (batch, seq_len, block_config.hidden_dim)
         assert not torch.any(torch.isnan(output))
         assert not torch.any(torch.isinf(output))
 
@@ -186,30 +168,24 @@ class TestFeedForward:
 
     def test_gelu_variants_difference(self, device: torch.device) -> None:
         """Test that GELU and GELU tanh produce different outputs."""
-        config_gelu = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config_gelu = TransformerBlockConfig(
             hidden_dim=64,
-            num_layers=2,
             num_heads=4,
             mlp_dim=256,
             dropout_rate=0.0,
             activation="gelu",
         )
 
-        config_gelu_tanh = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config_gelu_tanh = TransformerBlockConfig(
             hidden_dim=64,
-            num_layers=2,
             num_heads=4,
             mlp_dim=256,
             dropout_rate=0.0,
             activation="gelu_tanh",
         )
 
-        ffn_gelu = FeedForward(config=config_gelu).to(device)
-        ffn_gelu_tanh = FeedForward(config=config_gelu_tanh).to(device)
+        ffn_gelu = FeedForward(config=block_config_gelu).to(device)
+        ffn_gelu_tanh = FeedForward(config=block_config_gelu_tanh).to(device)
 
         # Copy weights to ensure difference is only from activation
         ffn_gelu_tanh.load_state_dict(ffn_gelu.state_dict(), strict=False)
@@ -218,7 +194,7 @@ class TestFeedForward:
         ffn_gelu_tanh.eval()
 
         batch, seq_len = 2, 8
-        x = torch.randn(batch, seq_len, config_gelu.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config_gelu.hidden_dim, device=device)
 
         with torch.no_grad():
             output_gelu = ffn_gelu(x)
@@ -230,11 +206,8 @@ class TestFeedForward:
 
     def test_gated_activation_output_shape(self, device: torch.device) -> None:
         """Test that gated FFN preserves input shape."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=256,
-            num_layers=4,
             num_heads=8,
             mlp_dim=1024,
             activation="swiglu",
@@ -242,41 +215,38 @@ class TestFeedForward:
 
         batch, seq_len = 2, 16
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
         ffn.eval()
 
-        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
 
         with torch.no_grad():
             output = ffn(x)
 
-        assert output.shape == (batch, seq_len, config.hidden_dim)
+        assert output.shape == (batch, seq_len, block_config.hidden_dim)
         assert not torch.any(torch.isnan(output))
         assert not torch.any(torch.isinf(output))
 
     def test_gated_activation_parameter_count(self, device: torch.device) -> None:
         """Test that gated FFN parameter count with chunking."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=256,
-            num_layers=4,
             num_heads=8,
             mlp_dim=1024,
             use_bias=True,
             activation="swiglu",
         )
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
 
         # With gated activation (chunk-based):
         # dense_1: (hidden_dim -> 2*mlp_dim) + 2*mlp_dim bias
         # dense_2: (mlp_dim -> hidden_dim) + hidden_dim bias (input is chunked to mlp_dim)
         expected_total = (
-            config.hidden_dim * (2 * config.mlp_dim)
-            + (2 * config.mlp_dim)
-            + config.mlp_dim * config.hidden_dim
-            + config.hidden_dim
+            block_config.hidden_dim * (2 * block_config.mlp_dim)
+            + (2 * block_config.mlp_dim)
+            + block_config.mlp_dim * block_config.hidden_dim
+            + block_config.hidden_dim
         )
 
         total_params = sum(p.numel() for p in ffn.parameters())
@@ -284,36 +254,30 @@ class TestFeedForward:
 
     def test_gated_vs_non_gated_outputs_differ(self, device: torch.device) -> None:
         """Test that gated and non-gated FFN produce different outputs."""
-        config_standard = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config_standard = TransformerBlockConfig(
             hidden_dim=128,
-            num_layers=2,
             num_heads=4,
             mlp_dim=512,
             dropout_rate=0.0,
             activation="gelu",
         )
 
-        config_gated = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config_gated = TransformerBlockConfig(
             hidden_dim=128,
-            num_layers=2,
             num_heads=4,
             mlp_dim=512,
             dropout_rate=0.0,
             activation="geglu",
         )
 
-        ffn_standard = FeedForward(config=config_standard).to(device)
-        ffn_gated = FeedForward(config=config_gated).to(device)
+        ffn_standard = FeedForward(config=block_config_standard).to(device)
+        ffn_gated = FeedForward(config=block_config_gated).to(device)
 
         ffn_standard.eval()
         ffn_gated.eval()
 
         batch, seq_len = 2, 8
-        x = torch.randn(batch, seq_len, config_standard.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config_standard.hidden_dim, device=device)
 
         with torch.no_grad():
             output_standard = ffn_standard(x)
@@ -325,27 +289,24 @@ class TestFeedForward:
     @pytest.mark.parametrize("activation", ["geglu", "swiglu"])
     def test_gated_activation_variants(self, activation: str, device: torch.device) -> None:
         """Test that gated activation works with different activation functions (GeGLU, SwiGLU)."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=64,
-            num_layers=2,
             num_heads=4,
             mlp_dim=256,
             dropout_rate=0.0,
             activation=activation,
         )
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
         ffn.eval()
 
         batch, seq_len = 2, 8
-        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
 
         with torch.no_grad():
             output = ffn(x)
 
-        assert output.shape == (batch, seq_len, config.hidden_dim)
+        assert output.shape == (batch, seq_len, block_config.hidden_dim)
         assert not torch.any(torch.isnan(output))
         assert not torch.any(torch.isinf(output))
 
@@ -360,11 +321,8 @@ class TestFeedForward:
 
     def test_swiglu_compilation(self, device: torch.device) -> None:
         """Test that SwiGLU can be compiled."""
-        config = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config = TransformerBlockConfig(
             hidden_dim=128,
-            num_layers=2,
             num_heads=4,
             mlp_dim=512,
             activation="swiglu",
@@ -372,10 +330,10 @@ class TestFeedForward:
 
         batch, seq_len = 2, 8
 
-        ffn = FeedForward(config=config).to(device)
+        ffn = FeedForward(config=block_config).to(device)
         ffn.eval()
 
-        x = torch.randn(batch, seq_len, config.hidden_dim, device=device)
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
 
         # Compile the module
         compiled_ffn = torch.compile(ffn)

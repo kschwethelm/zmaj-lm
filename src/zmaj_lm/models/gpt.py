@@ -30,26 +30,20 @@ class GPTModel(nn.Module):
         self.config = config
         self.embedding = TokenEmbedding(config=config)
 
-        # Create positional encoding instances for each layer
-        # If pos_encoding_type is a string, use the same encoding for all layers
-        # If it's a list, use different encodings per layer
-        if isinstance(config.pos_encoding_type, str):
-            # Single encoding type for all layers
+        # Create transformer blocks with per-layer configurations
+        self.transformer_blocks = nn.ModuleList()
+        for layer_idx in range(config.num_layers):
+            block_config = config.get_block_config(layer_idx)
             rope = (
-                RotaryPositionalEncoding(config=config)
-                if config.pos_encoding_type == "rope"
+                RotaryPositionalEncoding(
+                    config=block_config,
+                    head_dim=block_config.head_dim,
+                    max_seq_len=config.max_seq_len,
+                )
+                if block_config.pos_encoding_type == "rope"
                 else None
             )
-            self.transformer_blocks = nn.ModuleList(
-                [TransformerBlock(config=config, rope=rope) for _ in range(config.num_layers)]
-            )
-        else:
-            # Per-layer encoding types
-            self.transformer_blocks = nn.ModuleList()
-            for layer_idx in range(config.num_layers):
-                pos_enc_type = config.pos_encoding_type[layer_idx]
-                rope = RotaryPositionalEncoding(config=config) if pos_enc_type == "rope" else None
-                self.transformer_blocks.append(TransformerBlock(config=config, rope=rope))
+            self.transformer_blocks.append(TransformerBlock(config=block_config, rope=rope))
 
         self.final_layernorm = nn.LayerNorm(config.hidden_dim, eps=config.layer_norm_eps)
 
@@ -70,7 +64,10 @@ class GPTModel(nn.Module):
         """
         seq_len = input_ids.shape[1]
         mask = create_decoder_mask(
-            seq_len, device=input_ids.device, attention_mask=attention_mask
+            seq_len,
+            device=input_ids.device,
+            attention_mask=attention_mask,
+            window_size=self.config.window_size,
         )  # (batch, seq_len, seq_len) or (1, seq_len, seq_len)
 
         x = self.embedding.encode(input_ids)  # (batch, seq_len, hidden_dim)

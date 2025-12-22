@@ -4,17 +4,18 @@
 model:
   vocab_size: 50257
   max_seq_len: 512
-  hidden_dim: 768
   num_layers: 12
-  num_heads: 12
-  mlp_dim: 683  # 2/3 or 3/4 of mlp_dim when gated
-  dropout_rate: 0.0
-  attention_dropout_rate: 0.0
-  residual_dropout_rate: 0.0
-  layer_norm_eps: 1.0e-5
-  use_bias: false
-  pos_encoding_type: learned
-  activation: swiglu
+  block_config:
+    hidden_dim: 768
+    num_heads: 12
+    mlp_dim: 683  # 2/3 or 3/4 of mlp_dim when gated
+    dropout_rate: 0.0
+    attention_dropout_rate: 0.0
+    residual_dropout_rate: 0.0
+    layer_norm_eps: 1.0e-5
+    use_bias: false
+    pos_encoding_type: learned
+    activation: swiglu
 
 dataset:
   dataset_name: roneneldan/TinyStories

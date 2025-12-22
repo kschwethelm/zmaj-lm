@@ -156,18 +156,24 @@ class RotaryPositionalEncoding(nn.Module):
 
     freqs_complex: torch.Tensor
 
-    def __init__(self, config: TransformerConfig) -> None:
+    def __init__(
+        self, config: TransformerConfig, head_dim: int | None = None, max_seq_len: int | None = None
+    ) -> None:
         """Initialize RoPE with precomputed rotation frequencies.
 
         Args:
-            config: TransformerConfig instance with model configuration.
+            config: TransformerConfig instance with model configuration
+            head_dim: Head dimension (overrides config.head_dim if provided)
+            max_seq_len: Maximum sequence length (overrides config.max_seq_len if provided)
         """
         super().__init__()
         self.config = config
-        self.head_dim = config.head_dim
+        self.head_dim = head_dim if head_dim is not None else config.head_dim
+        self.rope_theta = config.rope_theta if hasattr(config, "rope_theta") else 10000.0
+        self.max_seq_len = max_seq_len if max_seq_len is not None else config.max_seq_len
 
         # Precompute rotation frequencies for max_seq_len
-        freqs_complex = self._compute_freqs(config.max_seq_len)
+        freqs_complex = self._compute_freqs(self.max_seq_len)
         # Register as buffer (not a parameter, but part of state_dict)
         self.register_buffer("freqs_complex", freqs_complex, persistent=False)
 
@@ -183,7 +189,7 @@ class RotaryPositionalEncoding(nn.Module):
         # Compute theta_i = rope_theta^(-2i/d) for i in [0, head_dim/2)
         # These are the rotation frequencies for each dimension pair
         dim_indices = torch.arange(0, self.head_dim, 2, dtype=torch.float32)
-        theta = self.config.rope_theta ** (-dim_indices / self.head_dim)  # [head_dim/2]
+        theta = self.rope_theta ** (-dim_indices / self.head_dim)  # [head_dim/2]
 
         # Create position indices for all possible positions
         positions = torch.arange(seq_len, dtype=torch.float32)  # [seq_len]
@@ -240,8 +246,8 @@ class RotaryPositionalEncoding(nn.Module):
             Tuple of (rotated_q, rotated_k) with same shapes as inputs
         """
         seq_len = q.shape[2]
-        assert seq_len <= self.config.max_seq_len, (
-            f"Sequence length {seq_len} exceeds maximum supported length {self.config.max_seq_len}"
+        assert seq_len <= self.max_seq_len, (
+            f"Sequence length {seq_len} exceeds maximum supported length {self.max_seq_len}"
         )
 
         # Get rotation frequencies for this sequence length

@@ -1,16 +1,16 @@
 import torch
 import torch.nn as nn
 
-from zmaj_lm.config.model_config import TransformerConfig
+from zmaj_lm.config.model_config import TransformerBlockConfig
 from zmaj_lm.models.activations import get_activation
 
 
 class FeedForward(nn.Module):
-    def __init__(self, config: TransformerConfig) -> None:
+    def __init__(self, config: TransformerBlockConfig) -> None:
         """Initialize the feedforward network.
 
         Args:
-            config: Transformer configuration
+            config: Transformer block configuration
         """
         super().__init__()
         self.config = config

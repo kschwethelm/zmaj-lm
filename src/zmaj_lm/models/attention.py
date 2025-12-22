@@ -2,29 +2,34 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from zmaj_lm.config.model_config import TransformerConfig
+from zmaj_lm.config.model_config import TransformerBlockConfig
 from zmaj_lm.models.positional_encoding import RotaryPositionalEncoding
 from zmaj_lm.utils.shapes import merge_heads_transposed, split_heads_transposed
 
 
 class MultiHeadAttention(nn.Module):
-    """Multi-head self-attention layer.
+    """Multi-head self-attention layer with support for Grouped Query Attention (GQA).
 
     Applies learned linear projections to create queries, keys, and values,
     then computes scaled dot-product attention across multiple heads in parallel.
     Optionally applies RoPE (Rotary Positional Encoding) to queries and keys.
+
+    Supports three attention variants via num_kv_heads configuration:
+    - Multi-Head Attention (MHA): num_kv_heads == num_heads (default)
+    - Grouped Query Attention (GQA): num_kv_heads < num_heads
+    - Multi-Query Attention (MQA): num_kv_heads == 1
     """
 
     def __init__(
         self,
-        config: TransformerConfig,
+        config: TransformerBlockConfig,
         rope: RotaryPositionalEncoding | None = None,
         return_attention_weights: bool = False,
     ) -> None:
         """Initialize the multi-head attention layer.
 
         Args:
-            config: Transformer configuration
+            config: Transformer block configuration
             rope: Optional RotaryPositionalEncoding instance for RoPE
             return_attention_weights: Whether to return attention weights
 
@@ -37,8 +42,10 @@ class MultiHeadAttention(nn.Module):
         self.return_attention_weights = return_attention_weights
 
         self.q_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
-        self.k_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
-        self.v_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
+        # For GQA: K and V projections output num_kv_heads * head_dim
+        kv_dim = config.num_kv_heads * config.head_dim
+        self.k_proj = nn.Linear(config.hidden_dim, kv_dim, bias=config.use_bias)
+        self.v_proj = nn.Linear(config.hidden_dim, kv_dim, bias=config.use_bias)
         self.out_proj = nn.Linear(config.hidden_dim, config.hidden_dim, bias=config.use_bias)
 
     def forward(
@@ -61,14 +68,21 @@ class MultiHeadAttention(nn.Module):
         """
         # Project inputs to Q, K, V
         query = self.q_proj(x)  # (batch, seq_len, hidden_dim)
-        key = self.k_proj(x)  # (batch, seq_len, hidden_dim)
-        value = self.v_proj(x)  # (batch, seq_len, hidden_dim)
+        key = self.k_proj(x)  # (batch, seq_len, num_kv_heads * head_dim)
+        value = self.v_proj(x)  # (batch, seq_len, num_kv_heads * head_dim)
 
         # Split into multiple attention heads
         query = split_heads_transposed(query, self.config.num_heads)
-        key = split_heads_transposed(key, self.config.num_heads)
-        value = split_heads_transposed(value, self.config.num_heads)
-        # Shape after split: (batch, n_heads, seq_len, head_dim)
+        key = split_heads_transposed(key, self.config.num_kv_heads)
+        value = split_heads_transposed(value, self.config.num_kv_heads)
+        # Q shape: (batch, num_heads, seq_len, head_dim)
+        # K, V shape: (batch, num_kv_heads, seq_len, head_dim)
+
+        # For GQA: repeat each K/V head to match number of Q heads
+        if self.config.num_kv_heads < self.config.num_heads:
+            key = key.repeat_interleave(self.config.num_kv_groups, dim=1)
+            value = value.repeat_interleave(self.config.num_kv_groups, dim=1)
+        # Shape after repeat: (batch, num_heads, seq_len, head_dim)
 
         # Apply RoPE if using rotary positional encoding
         if self.rope is not None:

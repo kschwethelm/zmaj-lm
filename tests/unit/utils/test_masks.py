@@ -10,6 +10,7 @@ from zmaj_lm.utils.masks import (
     create_decoder_mask,
     create_packing_mask,
     create_padding_mask,
+    create_sliding_window_mask,
     mask_to_bias,
 )
 
@@ -445,4 +446,211 @@ class TestCreateDecoderMask:
         mask_int = create_decoder_mask(
             4, device=device, attention_mask=attention_mask, dtype=torch.int32
         )
+        assert mask_int.dtype == torch.int32
+
+
+class TestCreateSlidingWindowMask:
+    """Tests for create_sliding_window_mask function."""
+
+    def test_shape(self, device: torch.device) -> None:
+        """Test that sliding window mask has correct shape."""
+        seq_len = 8
+        window_size = 3
+        mask = create_sliding_window_mask(seq_len, window_size, device=device)
+        assert mask.shape == (1, seq_len, seq_len)
+
+    def test_causal_sliding_window_pattern(self, device: torch.device) -> None:
+        """Test causal sliding window attention pattern."""
+        seq_len = 6
+        window_size = 3
+        mask = create_sliding_window_mask(seq_len, window_size, device=device, causal=True)
+
+        # Position 0: can attend to [max(0, 0-3+1), 0] = [0, 0] = position 0 only
+        assert mask[0, 0, 0]
+        for j in range(1, 6):
+            assert not mask[0, 0, j], f"Position 0 should not attend to {j}"
+
+        # Position 1: can attend to [max(0, 1-3+1), 1] = [0, 1]
+        assert mask[0, 1, 0] and mask[0, 1, 1]
+        for j in range(2, 6):
+            assert not mask[0, 1, j], f"Position 1 should not attend to {j}"
+
+        # Position 2: can attend to [max(0, 2-3+1), 2] = [0, 2]
+        assert mask[0, 2, 0] and mask[0, 2, 1] and mask[0, 2, 2]
+        for j in range(3, 6):
+            assert not mask[0, 2, j], f"Position 2 should not attend to {j}"
+
+        # Position 3: can attend to [max(0, 3-3+1), 3] = [1, 3]
+        assert not mask[0, 3, 0]  # Outside window
+        assert mask[0, 3, 1] and mask[0, 3, 2] and mask[0, 3, 3]
+        for j in range(4, 6):
+            assert not mask[0, 3, j], f"Position 3 should not attend to {j}"
+
+        # Position 4: can attend to [max(0, 4-3+1), 4] = [2, 4]
+        for j in range(2):
+            assert not mask[0, 4, j], f"Position 4 should not attend to {j}"
+        assert mask[0, 4, 2] and mask[0, 4, 3] and mask[0, 4, 4]
+        assert not mask[0, 4, 5]
+
+        # Position 5: can attend to [max(0, 5-3+1), 5] = [3, 5]
+        for j in range(3):
+            assert not mask[0, 5, j], f"Position 5 should not attend to {j}"
+        assert mask[0, 5, 3] and mask[0, 5, 4] and mask[0, 5, 5]
+
+    def test_bidirectional_sliding_window_pattern(self, device: torch.device) -> None:
+        """Test bidirectional sliding window attention pattern."""
+        seq_len = 7
+        window_size = 2
+        mask = create_sliding_window_mask(seq_len, window_size, device=device, causal=False)
+
+        # Position 0: can attend to [0-2, 0+2] = [-2, 2] -> [0, 2]
+        assert mask[0, 0, 0] and mask[0, 0, 1] and mask[0, 0, 2]
+        for j in range(3, 7):
+            assert not mask[0, 0, j], f"Position 0 should not attend to {j}"
+
+        # Position 3: can attend to [3-2, 3+2] = [1, 5]
+        assert not mask[0, 3, 0]
+        assert mask[0, 3, 1] and mask[0, 3, 2] and mask[0, 3, 3] and mask[0, 3, 4] and mask[0, 3, 5]
+        assert not mask[0, 3, 6]
+
+        # Position 6: can attend to [6-2, 6+2] = [4, 8] -> [4, 6]
+        for j in range(4):
+            assert not mask[0, 6, j], f"Position 6 should not attend to {j}"
+        assert mask[0, 6, 4] and mask[0, 6, 5] and mask[0, 6, 6]
+
+    def test_window_size_one(self, device: torch.device) -> None:
+        """Test with window_size=1 (only self-attention)."""
+        seq_len = 5
+        window_size = 1
+        mask = create_sliding_window_mask(seq_len, window_size, device=device, causal=True)
+
+        # Each position can only attend to itself
+        for i in range(seq_len):
+            for j in range(seq_len):
+                if i == j:
+                    assert mask[0, i, j], f"Position {i} should attend to itself"
+                else:
+                    assert not mask[0, i, j], f"Position {i} should not attend to {j}"
+
+    def test_large_window_equals_full_attention(self, device: torch.device) -> None:
+        """Test that large window_size equals full causal attention."""
+        seq_len = 10
+        window_size = seq_len  # Window large enough to cover all positions
+        mask = create_sliding_window_mask(seq_len, window_size, device=device, causal=True)
+        causal_mask = create_causal_mask(seq_len, device=device)
+
+        # Should be equivalent to full causal mask
+        assert torch.equal(mask, causal_mask)
+
+    def test_diagonal_all_true(self, device: torch.device) -> None:
+        """Test that diagonal is all True (tokens can attend to themselves)."""
+        mask = create_sliding_window_mask(10, window_size=3, device=device, causal=True)
+        diagonal = torch.diag(mask[0])
+        assert torch.all(diagonal)
+
+        # Also test bidirectional
+        mask_bidir = create_sliding_window_mask(10, window_size=3, device=device, causal=False)
+        diagonal_bidir = torch.diag(mask_bidir[0])
+        assert torch.all(diagonal_bidir)
+
+    def test_bidirectional_is_symmetric(self, device: torch.device) -> None:
+        """Test that bidirectional sliding window mask is symmetric."""
+        mask = create_sliding_window_mask(8, window_size=2, device=device, causal=False)
+
+        # Mask should be symmetric: if i can attend to j, then j can attend to i
+        for i in range(8):
+            for j in range(8):
+                assert mask[0, i, j] == mask[0, j, i], f"Asymmetry at ({i}, {j})"
+
+    def test_causal_is_lower_triangular(self, device: torch.device) -> None:
+        """Test that causal sliding window maintains lower triangular property."""
+        mask = create_sliding_window_mask(7, window_size=4, device=device, causal=True)
+
+        # Upper triangle should be all False (no attending to future)
+        for i in range(7):
+            for j in range(i + 1, 7):
+                assert not mask[0, i, j], f"Position {i} should not attend to future {j}"
+
+    def test_dtype(self, device: torch.device) -> None:
+        """Test that output dtype matches requested dtype."""
+        mask_bool = create_sliding_window_mask(5, 2, dtype=torch.bool, device=device)
+        assert mask_bool.dtype == torch.bool
+
+        mask_int = create_sliding_window_mask(5, 2, dtype=torch.int32, device=device)
+        assert mask_int.dtype == torch.int32
+
+    def test_single_token(self, device: torch.device) -> None:
+        """Test edge case with seq_len=1."""
+        mask = create_sliding_window_mask(1, window_size=3, device=device)
+        assert mask.shape == (1, 1, 1)
+        assert mask[0, 0, 0]
+
+
+class TestCreateDecoderMaskWithSlidingWindow:
+    """Tests for create_decoder_mask with sliding window support."""
+
+    def test_sliding_window_without_padding(self, device: torch.device) -> None:
+        """Test sliding window decoder mask without padding."""
+        seq_len = 6
+        window_size = 3
+        mask = create_decoder_mask(seq_len, device=device, window_size=window_size)
+
+        # Should match sliding window causal mask
+        expected = create_sliding_window_mask(seq_len, window_size, device=device, causal=True)
+        assert torch.equal(mask, expected)
+
+    def test_sliding_window_with_padding(self, device: torch.device) -> None:
+        """Test sliding window combined with padding mask."""
+        seq_len = 5
+        window_size = 2
+        lengths = torch.tensor([3, 5], device=device)
+        attention_mask = create_padding_mask(lengths, seq_len)
+
+        mask = create_decoder_mask(
+            seq_len, device=device, attention_mask=attention_mask, window_size=window_size
+        )
+
+        # First sequence: length 3, positions 3,4 are padding
+        # Position 2 with window_size=2: can attend to [1, 2] in sliding window
+        # But positions 3,4 are padding, so still can't attend to them
+        assert mask[0, 2, 1] and mask[0, 2, 2]
+        assert not mask[0, 2, 3] and not mask[0, 2, 4]  # Padding
+
+        # Position 1: can attend to [0, 1] in sliding window
+        assert mask[0, 1, 0] and mask[0, 1, 1]
+        assert not mask[0, 1, 2]  # Outside window (future)
+        assert not mask[0, 1, 3] and not mask[0, 1, 4]  # Padding
+
+        # Second sequence: no padding, only sliding window applies
+        # Position 4 with window_size=2: can attend to [3, 4]
+        assert not mask[1, 4, 0] and not mask[1, 4, 1]  # Outside window
+        assert not mask[1, 4, 2]  # Outside window
+        assert mask[1, 4, 3] and mask[1, 4, 4]
+
+    def test_window_size_none_equals_full_attention(self, device: torch.device) -> None:
+        """Test that window_size=None gives full causal attention."""
+        seq_len = 5
+        mask_with_none = create_decoder_mask(seq_len, device=device, window_size=None)
+        mask_without_param = create_decoder_mask(seq_len, device=device)
+
+        # Should be identical
+        assert torch.equal(mask_with_none, mask_without_param)
+
+    def test_sliding_window_maintains_causal_property(self, device: torch.device) -> None:
+        """Test that sliding window doesn't break causality."""
+        seq_len = 8
+        window_size = 4
+        mask = create_decoder_mask(seq_len, device=device, window_size=window_size)
+
+        # No position should attend to future positions
+        for i in range(seq_len):
+            for j in range(i + 1, seq_len):
+                assert not mask[0, i, j], f"Position {i} should not attend to future {j}"
+
+    def test_dtype_with_window(self, device: torch.device) -> None:
+        """Test that dtype is preserved with window_size."""
+        mask_bool = create_decoder_mask(5, device=device, window_size=3, dtype=torch.bool)
+        assert mask_bool.dtype == torch.bool
+
+        mask_int = create_decoder_mask(5, device=device, window_size=3, dtype=torch.int32)
         assert mask_int.dtype == torch.int32

@@ -117,10 +117,58 @@ def create_block_diagonal_mask(
     return mask.to(dtype)
 
 
+def create_sliding_window_mask(
+    seq_len: int,
+    window_size: int,
+    device: torch.device | str,
+    dtype: torch.dtype = torch.bool,
+    causal: bool = True,
+) -> torch.Tensor:
+    """Create a sliding window attention mask.
+
+    For causal sliding window (like Mistral):
+    - Position i attends to positions [max(0, i - window_size + 1), i]
+    - Creates a diagonal band in the lower triangular region
+
+    For bidirectional sliding window (like Longformer):
+    - Position i attends to positions [max(0, i - window_size), min(seq_len, i + window_size + 1)]
+    - Creates a diagonal band around the main diagonal
+
+    Args:
+        seq_len: Length of the sequence.
+        window_size: Size of the attention window. Each position can attend to
+                     at most window_size tokens (including itself for causal).
+        device: Device on which to create the mask.
+        dtype: Data type of the returned mask.
+        causal: If True, use causal sliding window. If False, use bidirectional.
+
+    Returns:
+        A (1, seq_len, seq_len) PyTorch tensor representing the sliding window mask.
+        True indicates that attention is allowed, False indicates it's masked out.
+    """
+    # Create position indices
+    row_idx = torch.arange(seq_len, device=device)[:, None]  # (seq_len, 1)
+    col_idx = torch.arange(seq_len, device=device)[None, :]  # (1, seq_len)
+
+    if causal:
+        # Causal: position i attends to [max(0, i - window_size + 1), i]
+        # This is equivalent to: (i - window_size + 1) <= j <= i
+        mask = (col_idx >= row_idx - window_size + 1) & (col_idx <= row_idx)
+    else:
+        # Bidirectional: position i attends to [i - window_size, i + window_size]
+        # This is equivalent to: |i - j| <= window_size
+        mask = torch.abs(row_idx - col_idx) <= window_size
+
+    # Add batch dimension: (seq_len, seq_len) -> (1, seq_len, seq_len)
+    mask = mask.unsqueeze(0).to(dtype)
+    return mask
+
+
 def create_decoder_mask(
     seq_len: int,
     device: torch.device | str,
     attention_mask: torch.Tensor | None = None,
+    window_size: int | None = None,
     dtype: torch.dtype = torch.bool,
 ) -> torch.Tensor:
     """Create a combined causal and attention mask for decoder self-attention.
@@ -131,6 +179,8 @@ def create_decoder_mask(
                         - None: Only causal masking is applied
                         - (batch_size, seq_len): Padding mask, True for valid tokens
                         - (batch_size, seq_len, seq_len): Packing/block-diagonal mask
+        window_size: Optional sliding window size. If None, uses full causal attention.
+                     If provided, applies sliding window attention with the specified window size.
         dtype: Data type of the returned mask.
         device: Device on which to create the mask.
 
@@ -138,9 +188,15 @@ def create_decoder_mask(
         A (batch_size, seq_len, seq_len) or (1, seq_len, seq_len) PyTorch tensor representing
         the combined mask. Shape depends on whether attention_mask is provided.
     """
-    causal_mask = create_causal_mask(
-        seq_len, dtype=dtype, device=device
-    )  # Shape (1, seq_len, seq_len)
+    # Create base causal mask (either full or sliding window)
+    if window_size is None:
+        causal_mask = create_causal_mask(
+            seq_len, dtype=dtype, device=device
+        )  # Shape (1, seq_len, seq_len)
+    else:
+        causal_mask = create_sliding_window_mask(
+            seq_len, window_size, dtype=dtype, device=device, causal=True
+        )  # Shape (1, seq_len, seq_len)
 
     if attention_mask is None:
         return causal_mask
