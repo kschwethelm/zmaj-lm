@@ -18,6 +18,7 @@ class TransformerBlockConfig(BaseModel):
 
     dropout_rate: float = 0.1  # dropout rate (0.0 to 0.1 typically)
     layer_norm_eps: float = 1e-5
+    norm_type: Literal["layernorm", "rmsnorm"] = "layernorm"
     use_bias: bool = True  # whether to use bias in linear layers
     attention_dropout_rate: float | None = None  # if None, use dropout_rate
     residual_dropout_rate: float | None = None  # if None, use dropout_rate

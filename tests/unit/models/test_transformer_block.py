@@ -140,3 +140,68 @@ class TestTransformerBlock:
             output_regular = block(x)
 
         assert torch.allclose(output_compiled, output_regular, rtol=1e-5, atol=1e-5)
+
+    def test_rmsnorm(self, device: torch.device) -> None:
+        """Test that TransformerBlock works with RMSNorm."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=256,
+            num_heads=8,
+            mlp_dim=1024,
+            norm_type="rmsnorm",
+        )
+
+        batch, seq_len = 2, 16
+
+        block = TransformerBlock(config=block_config).to(device)
+        block.eval()
+
+        x = torch.randn(batch, seq_len, block_config.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output = block(x)
+
+        assert output.shape == (batch, seq_len, block_config.hidden_dim)
+        assert not torch.any(torch.isnan(output))
+        assert not torch.any(torch.isinf(output))
+
+        # Verify that RMSNorm is actually being used
+        assert isinstance(block.layernorm_1, torch.nn.RMSNorm)
+        assert isinstance(block.layernorm_2, torch.nn.RMSNorm)
+
+    def test_layernorm_vs_rmsnorm(self, device: torch.device) -> None:
+        """Test that LayerNorm and RMSNorm produce different outputs."""
+        block_config_ln = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=4,
+            mlp_dim=512,
+            norm_type="layernorm",
+            dropout_rate=0.0,
+        )
+
+        block_config_rms = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=4,
+            mlp_dim=512,
+            norm_type="rmsnorm",
+            dropout_rate=0.0,
+        )
+
+        batch, seq_len = 2, 8
+
+        torch.manual_seed(42)
+        block_ln = TransformerBlock(config=block_config_ln).to(device)
+        torch.manual_seed(42)
+        block_rms = TransformerBlock(config=block_config_rms).to(device)
+
+        block_ln.eval()
+        block_rms.eval()
+
+        torch.manual_seed(42)
+        x = torch.randn(batch, seq_len, block_config_ln.hidden_dim, device=device)
+
+        with torch.no_grad():
+            output_ln = block_ln(x)
+            output_rms = block_rms(x)
+
+        # Outputs should be different (RMSNorm doesn't center, LayerNorm does)
+        assert not torch.allclose(output_ln, output_rms, rtol=0.1)

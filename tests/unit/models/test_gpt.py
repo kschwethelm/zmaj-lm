@@ -321,3 +321,38 @@ class TestGPTModel:
             last_pos_logits = logits[0, -1, :]
 
             assert not torch.allclose(first_pos_logits, last_pos_logits, rtol=0.1)
+
+    def test_rmsnorm(self, device: torch.device) -> None:
+        """Test that GPT model works with RMSNorm."""
+        from zmaj_lm.config.model_config import TransformerBlockConfig
+
+        config = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=256,
+            num_layers=2,
+            block_config=TransformerBlockConfig(
+                hidden_dim=128,
+                num_heads=4,
+                mlp_dim=512,
+                norm_type="rmsnorm",
+            ),
+        )
+
+        batch, seq_len = 2, 32
+
+        model = GPTModel(config=config).to(device)
+        model.eval()
+
+        input_ids = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
+
+        with torch.no_grad():
+            logits = model(input_ids)
+
+        assert logits.shape == (batch, seq_len, config.vocab_size)
+        assert not torch.any(torch.isnan(logits))
+        assert not torch.any(torch.isinf(logits))
+
+        # Verify that RMSNorm is used in transformer blocks and final norm
+        assert isinstance(model.transformer_blocks[0].layernorm_1, torch.nn.RMSNorm)
+        assert isinstance(model.transformer_blocks[0].layernorm_2, torch.nn.RMSNorm)
+        assert isinstance(model.final_layernorm, torch.nn.RMSNorm)

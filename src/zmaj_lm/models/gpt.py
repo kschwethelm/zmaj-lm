@@ -45,7 +45,10 @@ class GPTModel(nn.Module):
             )
             self.transformer_blocks.append(TransformerBlock(config=block_config, rope=rope))
 
-        self.final_layernorm = nn.LayerNorm(config.hidden_dim, eps=config.layer_norm_eps)
+        # Select normalization type (use first block's config for final norm)
+        first_block_config = config.get_block_config(0)
+        norm_class = nn.RMSNorm if first_block_config.norm_type == "rmsnorm" else nn.LayerNorm
+        self.final_layernorm = norm_class(config.hidden_dim, eps=config.layer_norm_eps)
 
     def forward(
         self,

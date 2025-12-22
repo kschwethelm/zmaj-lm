@@ -31,8 +31,12 @@ class TransformerBlock(nn.Module):
         self.config = config
         self.attention = MultiHeadAttention(config=config, rope=rope)
         self.feedforward = FeedForward(config=config)
-        self.layernorm_1 = nn.LayerNorm(config.hidden_dim, eps=config.layer_norm_eps)
-        self.layernorm_2 = nn.LayerNorm(config.hidden_dim, eps=config.layer_norm_eps)
+
+        # Select normalization type
+        norm_class = nn.RMSNorm if config.norm_type == "rmsnorm" else nn.LayerNorm
+        self.layernorm_1 = norm_class(config.hidden_dim, eps=config.layer_norm_eps)
+        self.layernorm_2 = norm_class(config.hidden_dim, eps=config.layer_norm_eps)
+
         self.residual_dropout = nn.Dropout(p=config.residual_dropout_rate)
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
