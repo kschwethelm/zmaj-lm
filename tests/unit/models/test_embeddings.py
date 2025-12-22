@@ -1,6 +1,6 @@
 import torch
 
-from zmaj_lm.config.model_config import TransformerConfig
+from zmaj_lm.config.model_config import TransformerBlockConfig, TransformerConfig
 from zmaj_lm.models.embeddings import TokenEmbedding
 
 
@@ -111,13 +111,16 @@ class TestTokenEmbedding:
 
     def test_parameter_count_sinusoidal_positions(self, device: torch.device) -> None:
         """Test parameter count with sinusoidal positional encodings (no extra params)."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=256,
+            num_heads=8,
+            pos_encoding_type="sinusoidal",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=256,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="sinusoidal",
+            block_config=block_config,
         )
 
         embedding = TokenEmbedding(config=config).to(device)

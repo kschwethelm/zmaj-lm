@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from zmaj_lm.config.model_config import TransformerConfig
+from zmaj_lm.config.model_config import TransformerBlockConfig, TransformerConfig
 from zmaj_lm.models.positional_encoding import (
     LearnedPositionalEncoding,
     NoPositionalEncoding,
@@ -16,13 +16,16 @@ class TestSinusoidalPositionalEncoding:
 
     def test_output_shape(self, device: torch.device) -> None:
         """Test that sinusoidal encoding preserves input shape."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=256,
+            num_heads=8,
+            pos_encoding_type="sinusoidal",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=256,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="sinusoidal",
+            block_config=block_config,
         )
 
         batch, seq_len = 2, 128
@@ -38,13 +41,16 @@ class TestSinusoidalPositionalEncoding:
 
     def test_deterministic_output(self, device: torch.device) -> None:
         """Test that sinusoidal encodings are deterministic (no randomness)."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="sinusoidal",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="sinusoidal",
+            block_config=block_config,
         )
 
         batch, seq_len = 2, 64
@@ -60,13 +66,16 @@ class TestSinusoidalPositionalEncoding:
 
     def test_variable_sequence_lengths(self, device: torch.device) -> None:
         """Test that encoding works for different sequence lengths up to max_seq_len."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="sinusoidal",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="sinusoidal",
+            block_config=block_config,
         )
 
         batch = 2
@@ -81,13 +90,16 @@ class TestSinusoidalPositionalEncoding:
 
     def test_position_encoding_properties(self, device: torch.device) -> None:
         """Test mathematical properties of sinusoidal encoding."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=64,
+            num_heads=4,
+            pos_encoding_type="sinusoidal",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=128,
-            hidden_dim=64,
             num_layers=2,
-            num_heads=4,
-            pos_encoding_type="sinusoidal",
+            block_config=block_config,
         )
 
         batch, seq_len = 1, 128
@@ -111,13 +123,16 @@ class TestSinusoidalPositionalEncoding:
 
     def test_exceeds_max_seq_len_raises(self, device: torch.device) -> None:
         """Test that sequence length exceeding max_seq_len raises an error."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=64,
+            num_heads=4,
+            pos_encoding_type="sinusoidal",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=128,
-            hidden_dim=64,
             num_layers=2,
-            num_heads=4,
-            pos_encoding_type="sinusoidal",
+            block_config=block_config,
         )
 
         batch, seq_len = 2, 256  # Exceeds max_seq_len=128
@@ -134,13 +149,16 @@ class TestLearnedPositionalEncoding:
 
     def test_output_shape(self, device: torch.device) -> None:
         """Test that learned encoding preserves input shape."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=256,
+            num_heads=8,
+            pos_encoding_type="learned",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=256,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="learned",
+            block_config=block_config,
         )
 
         batch, seq_len = 2, 128
@@ -156,13 +174,16 @@ class TestLearnedPositionalEncoding:
 
     def test_parameter_count(self, device: torch.device) -> None:
         """Test that learned embeddings have correct number of parameters."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=256,
+            num_heads=8,
+            pos_encoding_type="learned",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=256,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="learned",
+            block_config=block_config,
         )
 
         pos_enc = LearnedPositionalEncoding(config=config).to(device)
@@ -175,13 +196,16 @@ class TestLearnedPositionalEncoding:
 
     def test_different_positions_different_embeddings(self, device: torch.device) -> None:
         """Test that different positions have different learned embeddings."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=64,
+            num_heads=4,
+            pos_encoding_type="learned",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=128,
-            hidden_dim=64,
             num_layers=2,
-            num_heads=4,
-            pos_encoding_type="learned",
+            block_config=block_config,
         )
 
         batch, seq_len = 1, 128
@@ -205,13 +229,16 @@ class TestLearnedPositionalEncoding:
 
     def test_variable_sequence_lengths(self, device: torch.device) -> None:
         """Test that encoding works for different sequence lengths up to max_seq_len."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="learned",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="learned",
+            block_config=block_config,
         )
 
         batch = 2
@@ -226,13 +253,16 @@ class TestLearnedPositionalEncoding:
 
     def test_exceeds_max_seq_len_raises(self, device: torch.device) -> None:
         """Test that sequence length exceeding max_seq_len raises an error."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=64,
+            num_heads=4,
+            pos_encoding_type="learned",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=128,
-            hidden_dim=64,
             num_layers=2,
-            num_heads=4,
-            pos_encoding_type="learned",
+            block_config=block_config,
         )
 
         batch, seq_len = 2, 256  # Exceeds max_seq_len=128
@@ -249,13 +279,16 @@ class TestGetPositionalEncodingModule:
 
     def test_returns_sinusoidal_when_specified(self) -> None:
         """Test that factory returns SinusoidalPositionalEncoding when specified."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="sinusoidal",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="sinusoidal",
+            block_config=block_config,
         )
 
         module = get_positional_encoding_module(config)
@@ -263,13 +296,16 @@ class TestGetPositionalEncodingModule:
 
     def test_returns_learned_when_specified(self) -> None:
         """Test that factory returns LearnedPositionalEncoding when specified."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="learned",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="learned",
+            block_config=block_config,
         )
 
         module = get_positional_encoding_module(config)
@@ -277,26 +313,32 @@ class TestGetPositionalEncodingModule:
 
     def test_returns_learned_by_default(self) -> None:
         """Test that factory returns LearnedPositionalEncoding by default."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+        )  # pos_encoding_type defaults to "learned"
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-        )  # pos_encoding_type defaults to "learned"
+            block_config=block_config,
+        )
 
         module = get_positional_encoding_module(config)
         assert isinstance(module, LearnedPositionalEncoding)
 
     def test_returns_rope_when_specified(self) -> None:
         """Test that factory returns RotaryPositionalEncoding when specified."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         module = get_positional_encoding_module(config)
@@ -304,13 +346,16 @@ class TestGetPositionalEncodingModule:
 
     def test_returns_none_when_specified(self) -> None:
         """Test that factory returns NoPositionalEncoding when specified."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="none",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="none",
+            block_config=block_config,
         )
 
         module = get_positional_encoding_module(config)
@@ -322,13 +367,16 @@ class TestNoPositionalEncoding:
 
     def test_output_unchanged(self, device: torch.device) -> None:
         """Test that NoPE returns input unchanged."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=256,
+            num_heads=8,
+            pos_encoding_type="none",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=256,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="none",
+            block_config=block_config,
         )
 
         batch, seq_len = 2, 128
@@ -343,13 +391,16 @@ class TestNoPositionalEncoding:
 
     def test_no_parameters(self, device: torch.device) -> None:
         """Test that NoPE has no learnable parameters."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=256,
+            num_heads=8,
+            pos_encoding_type="none",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=256,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="none",
+            block_config=block_config,
         )
 
         pos_enc = NoPositionalEncoding(config=config).to(device)
@@ -362,13 +413,16 @@ class TestRotaryPositionalEncoding:
 
     def test_initialization(self, device: torch.device) -> None:
         """Test that RoPE initializes correctly with precomputed frequencies."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         rope = RotaryPositionalEncoding(config=config).to(device)
@@ -379,13 +433,16 @@ class TestRotaryPositionalEncoding:
 
     def test_forward_is_noop(self, device: torch.device) -> None:
         """Test that forward pass is a no-op (rotation happens in attention)."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         batch, seq_len = 2, 64
@@ -399,13 +456,16 @@ class TestRotaryPositionalEncoding:
 
     def test_apply_rotary_pos_emb_shape(self, device: torch.device) -> None:
         """Test that apply_rotary_pos_emb preserves shapes."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         batch, n_heads, seq_len, head_dim = 2, 8, 64, 16
@@ -425,13 +485,16 @@ class TestRotaryPositionalEncoding:
 
     def test_rotation_changes_vectors(self, device: torch.device) -> None:
         """Test that RoPE actually modifies the query and key vectors."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         batch, n_heads, seq_len, head_dim = 2, 8, 64, 16
@@ -452,13 +515,16 @@ class TestRotaryPositionalEncoding:
         The inner product between rotated query at position m and rotated key
         at position n should depend only on (m-n), not on absolute positions.
         """
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         batch, n_heads, seq_len, head_dim = 1, 1, 10, 16
@@ -488,24 +554,30 @@ class TestRotaryPositionalEncoding:
 
     def test_different_rope_theta(self, device: torch.device) -> None:
         """Test that different rope_theta values produce different rotations."""
-        config1 = TransformerConfig(
-            vocab_size=1000,
-            max_seq_len=512,
+        block_config1 = TransformerBlockConfig(
             hidden_dim=128,
-            num_layers=4,
             num_heads=8,
             pos_encoding_type="rope",
             rope_theta=10000.0,
         )
-
-        config2 = TransformerConfig(
+        config1 = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
+            block_config=block_config1,
+        )
+
+        block_config2 = TransformerBlockConfig(
+            hidden_dim=128,
             num_heads=8,
             pos_encoding_type="rope",
             rope_theta=100000.0,  # Different theta
+        )
+        config2 = TransformerConfig(
+            vocab_size=1000,
+            max_seq_len=512,
+            num_layers=4,
+            block_config=block_config2,
         )
 
         rope1 = RotaryPositionalEncoding(config=config1).to(device)
@@ -527,13 +599,16 @@ class TestRotaryPositionalEncoding:
 
     def test_variable_sequence_lengths(self, device: torch.device) -> None:
         """Test that RoPE works for different sequence lengths."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         batch, n_heads, head_dim = 2, 8, 16
@@ -552,13 +627,16 @@ class TestRotaryPositionalEncoding:
 
     def test_exceeds_max_seq_len_raises(self, device: torch.device) -> None:
         """Test that sequence length exceeding max_seq_len raises an error."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=128,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         batch, n_heads, seq_len, head_dim = 2, 8, 256, 16  # seq_len > max_seq_len
@@ -572,13 +650,16 @@ class TestRotaryPositionalEncoding:
 
     def test_no_learnable_parameters(self, device: torch.device) -> None:
         """Test that RoPE has no learnable parameters (only buffers)."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         rope = RotaryPositionalEncoding(config=config).to(device)
@@ -587,13 +668,16 @@ class TestRotaryPositionalEncoding:
 
     def test_rotation_preserves_norm(self, device: torch.device) -> None:
         """Test that rotation approximately preserves vector norms."""
+        block_config = TransformerBlockConfig(
+            hidden_dim=128,
+            num_heads=8,
+            pos_encoding_type="rope",
+        )
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=512,
-            hidden_dim=128,
             num_layers=4,
-            num_heads=8,
-            pos_encoding_type="rope",
+            block_config=block_config,
         )
 
         batch, n_heads, seq_len, head_dim = 2, 8, 64, 16

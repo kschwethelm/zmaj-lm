@@ -165,3 +165,37 @@ class TransformerConfig(BaseModel):
         if isinstance(self.block_config, list):
             return self.block_config[0].layer_norm_eps
         return self.block_config.layer_norm_eps
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def pos_encoding_type(self) -> Literal["learned", "sinusoidal", "rope", "none"]:
+        """Convenience property to access pos_encoding_type from first block_config."""
+        if isinstance(self.block_config, list):
+            return self.block_config[0].pos_encoding_type
+        return self.block_config.pos_encoding_type
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def dropout_rate(self) -> float:
+        """Convenience property to access dropout_rate from first block_config."""
+        if isinstance(self.block_config, list):
+            return self.block_config[0].dropout_rate
+        return self.block_config.dropout_rate
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def rope_theta(self) -> float:
+        """Convenience property to access rope_theta from first block_config."""
+        if isinstance(self.block_config, list):
+            return self.block_config[0].rope_theta
+        return self.block_config.rope_theta
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def mlp_dim(self) -> int:
+        """Convenience property to access mlp_dim from first block_config."""
+        if isinstance(self.block_config, list):
+            assert self.block_config[0].mlp_dim is not None  # Set by validator
+            return self.block_config[0].mlp_dim
+        assert self.block_config.mlp_dim is not None  # Set by validator
+        return self.block_config.mlp_dim
