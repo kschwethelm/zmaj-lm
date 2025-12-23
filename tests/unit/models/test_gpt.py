@@ -1,6 +1,6 @@
 import torch
 
-from zmaj_lm.config.model_config import TransformerConfig
+from zmaj_lm.config.model_config import TransformerBlockConfig, TransformerConfig
 from zmaj_lm.models.gpt import GPTModel
 
 
@@ -71,12 +71,15 @@ class TestGPTModel:
         config = TransformerConfig(
             vocab_size=1000,
             max_seq_len=256,
-            hidden_dim=128,
             num_layers=2,
-            num_heads=4,
-            mlp_dim=512,
-            pos_encoding_type="learned",
-            use_bias=True,
+            block_config=TransformerBlockConfig(
+                hidden_dim=128,
+                num_heads=4,
+                mlp_dim=512,
+                pos_encoding_type="learned",
+                use_bias=True,
+                activation="gelu",
+            ),
         )
 
         model = GPTModel(config=config).to(device)

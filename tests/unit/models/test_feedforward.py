@@ -37,6 +37,7 @@ class TestFeedForward:
             num_heads=8,
             mlp_dim=1024,
             use_bias=True,
+            activation="gelu",
         )
 
         ffn = FeedForward(config=block_config).to(device)
