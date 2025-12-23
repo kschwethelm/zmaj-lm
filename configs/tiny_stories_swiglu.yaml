@@ -12,9 +12,9 @@ model:
     dropout_rate: 0.0
     attention_dropout_rate: 0.0
     residual_dropout_rate: 0.0
-    layer_norm_eps: 1.0e-5
+    norm_type: rmsnorm
     use_bias: false
-    pos_encoding_type: learned
+    pos_encoding_type: rope
     activation: swiglu
 
 dataset:
@@ -34,7 +34,7 @@ dataset:
 
 training:
   seed: 42
-  run_name: tiny-stories-12L-12H-768D-swiglu
+  run_name: tiny-stories-12L-12H-768D-swiglu-rms-rope
   learning_rate: 5e-4
   weight_decay: 0.1
   beta1: 0.9

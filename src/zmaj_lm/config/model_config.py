@@ -28,7 +28,7 @@ class TransformerBlockConfig(BaseModel):
     rope_theta: float = (
         10000.0  # RoPE base frequency (10000 standard, larger values for long context)
     )
-    activation: Literal["gelu", "gelu_tanh", "silu", "relu", "geglu", "swiglu"] = "gelu"
+    activation: Literal["gelu", "gelu_tanh", "silu", "relu", "geglu", "swiglu"] = "swiglu"
 
     @model_validator(mode="after")
     def validate_num_heads(self) -> "TransformerBlockConfig":
@@ -200,3 +200,11 @@ class TransformerConfig(BaseModel):
             return self.block_config[0].mlp_dim
         assert self.block_config.mlp_dim is not None  # Set by validator
         return self.block_config.mlp_dim
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def num_heads(self) -> int:
+        """Convenience property to access num_heads from first block_config."""
+        if isinstance(self.block_config, list):
+            return self.block_config[0].num_heads
+        return self.block_config.num_heads
